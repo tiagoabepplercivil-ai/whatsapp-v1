@@ -173,6 +173,7 @@ function renderChats() {
   return h + '<div style="height:90px"></div>';
 }
 function cardTitle(card) {
+  if (card.type === 'done?') return (card.status === 'pendente' || !card.status ? 'Isso foi feito? ' : '') + (db.tasks.find(t => t.id === card.id)?.title || '');
   if (card.type === 'sug') return (card.status === 'pendente' || !card.status ? 'Colocar como tarefa? ' : '') + card.titulo;
   if (card.type === 'plan') return 'Plano: ' + (db.plans.find(p => p.id === card.id)?.titulo || '');
   if (card.type === 'event') return db.events.find(e => e.id === card.id)?.title || 'Compromisso removido';
@@ -269,9 +270,37 @@ function chatStatus(c) {
 }
 function closeChat() { openChatId = null; $('#chat').classList.remove('open'); render(); }
 
+// nada sai da lista de atividades sem o Sim dele: a assistente pergunta "Isso foi feito?" (cartão) e o quadradinho pede confirmação
+function askDone(id, motivo, force) {
+  const t = db.tasks.find(x => x.id === id); if (!t || t.done || t.askDone) return false;
+  if (!force && t.doneNo && Date.now() - t.doneNo < 24 * 3600e3) return false; // ele disse "ainda não" há menos de 24 h
+  t.askDone = true;
+  pushMsg('claude', { from: 'them', card: { type: 'done?', id, motivo: motivo || '', status: 'pendente' } });
+  return true;
+}
+function doneAnswer(id, yes) {
+  const t = db.tasks.find(x => x.id === id); if (!t) return;
+  if (yes) t.done = true; else t.doneNo = Date.now();
+  t.askDone = false;
+  for (const m of db.chats.find(c => c.id === 'claude').messages) if (m.card && m.card.type === 'done?' && m.card.id === id && (m.card.status || 'pendente') === 'pendente') m.card.status = yes ? 'feito' : 'nao';
+  save(); render(); if (openChatId) renderMsgs();
+}
+function confirmDoneSheet(id) {
+  const t = db.tasks.find(x => x.id === id); if (!t) return;
+  sheet(`<h2>Isso foi feito?</h2><div class="field" style="font-size:15px">${esc(t.title)}</div><div class="hint" style="padding:0 0 8px">Só sai da lista se você confirmar.</div>
+    <div class="btns"><button class="btn" data-act="close">Ainda não</button><button class="btn pri" data-act="done-yes" data-id="${t.id}">Sim, foi feito</button></div>`);
+}
 // triagem: só vira cartão o que é pedido/pergunta a ele, promessa dele ou compromisso com ele
 const ORIGENS = { pedido: p => `${p || 'Alguém'} te pediu`, pergunta: p => `${p || 'Alguém'} te perguntou`, promessa: () => 'Você prometeu', compromisso: () => 'Compromisso com você' };
 function cardHtml(card) {
+  if (card.type === 'done?') {
+    const t = db.tasks.find(x => x.id === card.id); const st = card.status || 'pendente';
+    if (!t) return `<div class="card off"><div class="cb cs">Atividade removida</div></div>`;
+    const head = st === 'feito' ? '✓ Feito, saiu da lista' : st === 'nao' ? 'Ficou na lista' : 'Isso foi feito?';
+    return `<div class="card ${st !== 'pendente' ? 'off' : ''}"><div class="ch" ${st !== 'pendente' ? 'style="background:var(--panel);color:var(--muted)"' : ''}>${head}</div><div class="cb">
+      <div class="ct">${t.done ? '☑' : '☐'} ${esc(t.title)}</div>${card.motivo && st === 'pendente' ? `<div class="cs tq">${esc(card.motivo)}</div>` : ''}</div>
+      ${st === 'pendente' ? `<div class="acts"><button class="ok" data-act="done-yes" data-id="${t.id}">✅ Sim, foi feito</button><button data-act="done-no" data-id="${t.id}">Ainda não</button></div>` : ''}</div>`;
+  }
   if (card.type === 'sug') {
     const ic = { compromisso: '📅', lembrete: '🔔', responder: '💬' }[card.tipo] || '✅';
     const st = card.status || 'pendente', alta = card.prioridade === 'alta';
@@ -297,7 +326,7 @@ function cardHtml(card) {
     const ev = db.events.find(e => e.id === card.id);
     if (!ev) return `<div class="card"><div class="cb cs">Compromisso removido</div></div>`;
     const n = db.tasks.filter(t => t.eventId === ev.id);
-    return `<div class="card"><div class="ch">📅 Compromisso marcado</div><div class="cb">
+    return `<div class="card"><div class="ch" ${card.soon ? 'style="background:#fde2b6;color:#6b3d00"' : ''}>${card.soon || '📅 Compromisso marcado'}</div><div class="cb">
       <div class="ct">${esc(ev.title)}</div><div class="cs">${esc(fmtWhen(ev))}${ev.location ? ' · 📍 ' + esc(ev.location) : ''}</div>
       ${n.length ? `<div class="cs">${n.map(t => (t.done ? '☑ ' : '☐ ') + esc(t.title)).join('<br>')}</div>` : ''}</div>
       <div class="acts">${gcalOn() ? '' : `<button data-gcal="${ev.id}">Google Agenda</button>`}<button data-ics="${ev.id}">.ics</button><button data-event="${ev.id}">Abrir</button></div></div>`;
@@ -306,8 +335,8 @@ function cardHtml(card) {
   if (!t) return `<div class="card"><div class="cb cs">Atividade removida</div></div>`;
   const ev = t.eventId && db.events.find(e => e.id === t.eventId);
   const src = t.chatId && t.chatId !== 'claude' && db.chats.find(c => c.id === t.chatId);
-  const head = card.alarm ? '⏰ Hora do lembrete!' : t.remindAt ? '🔔 Lembrete criado' : '✅ Atividade criada';
-  return `<div class="card"><div class="ch" style="background:${card.alarm ? '#ea0038;color:#fff' : '#ffbc2d;color:#3b2a00'}">${head}</div><div class="cb">
+  const head = card.alarm ? '⏰ Hora do lembrete!' : card.soon ? card.soon : t.remindAt ? '🔔 Lembrete criado' : '✅ Atividade criada';
+  return `<div class="card"><div class="ch" style="background:${card.alarm ? '#ea0038;color:#fff' : card.soon ? '#fde2b6;color:#6b3d00' : '#ffbc2d;color:#3b2a00'}">${head}</div><div class="cb">
     <div class="ct">${t.done ? '☑' : '☐'} ${esc(t.title)}</div>
     <div class="cs">${t.remindAt ? '🔔 ' + esc(fmtDay(t.remindAt)) + ', ' + fmtHour(t.remindAt) : t.due ? 'Prazo: ' + parseLocal(t.due).toLocaleDateString('pt-BR') : 'Sem prazo'}${ev ? ' · 📅 ' + esc(ev.title) : ''}${src ? ' · 💬 ' + esc(src.name) : ''}</div></div>
     <div class="acts"><button data-toggle="${t.id}">${t.done ? 'Reabrir' : 'Concluir'}</button>${ev ? `<button data-event="${ev.id}">Ver compromisso</button>` : ''}</div></div>`;
@@ -329,25 +358,41 @@ function msgsHtml(c, menus) {
   }
   return h;
 }
-// bloco "Atividades" do painel: pendentes por data, uma linha cada, quadradinho para dar baixa e ⚡ para preparar a execução
+// bloco do alto do painel: compromissos da agenda + atividades pendentes, em ordem de horário, para ir lembrando
+function soonInfo(when, allDay) { // "chegando": em N min / em N h (até 24 h) ou hoje (só data)
+  if (!when) return null;
+  if (when.length > 10 && !allDay) { const m = Math.round((parseLocal(when) - Date.now()) / 60000); if (m < 0 || m > 24 * 60) return null; return { txt: m < 1 ? 'agora' : m < 60 ? `em ${m} min` : m < 180 ? `em ${Math.floor(m / 60)} h${m % 60 ? ' ' + String(m % 60).padStart(2, '0') : ''}` : `em ${Math.round(m / 60)} h`, hot: m <= 60 }; }
+  return when.slice(0, 10) === ymd(new Date()) ? { txt: 'hoje', hot: false } : null;
+}
 function ptRow(t) {
   const late = !t.done && ((t.remindAt && t.remindAt < localISO(new Date())) || (!t.remindAt && t.due && t.due < ymd(new Date())));
   const when = t.remindAt ? shortDay(t.remindAt) + ', ' + fmtHour(t.remindAt) : t.due ? shortDay(t.due) : '';
   const src = t.chatId && t.chatId !== 'claude' && db.chats.find(c => c.id === t.chatId);
   const sub = [when, src && src.name].filter(Boolean).join(' · ');
+  const soon = !late && soonInfo(t.remindAt || t.due);
   const wait = db.plans.some(p => p.taskId === t.id && p.status === 'aguardando_ok');
-  return `<div class="pt"><input type="checkbox" data-toggle="${t.id}" ${t.done ? 'checked' : ''}><div class="t" data-task="${t.id}"><div class="tt">${esc(t.title)}</div>${sub ? `<div class="s ${late ? 'late' : ''}">${late ? 'atrasada · ' : ''}${esc(sub)}</div>` : ''}</div>`
+  const subHtml = t.askDone ? '<div class="s ask">❓ foi feito? confirme no chat</div>'
+    : sub ? `<div class="s ${late ? 'late' : soon ? 'soon' + (soon.hot ? ' hot' : '') : ''}">${late ? 'atrasada · ' : soon ? '⏳ ' + soon.txt + ' · ' : ''}${esc(sub)}</div>` : '';
+  return `<div class="pt"><input type="checkbox" data-toggle="${t.id}" ${t.done ? 'checked' : ''}><div class="t" data-task="${t.id}"><div class="tt">${esc(t.title)}</div>${subHtml}</div>`
     + (wait ? '<span class="pa wait" title="Plano pronto, aguardando seu ok no chat">🗂</span>' : `<button class="pa" data-act="task-plan" data-id="${t.id}" title="Preparar execução (deixo a mensagem pronta, marco, anoto)">⚡</button>`) + '</div>';
+}
+function peRow(ev) {
+  const soon = soonInfo(ev.start, ev.allDay);
+  const sub = [ev.allDay ? shortDay(ev.start) + ' · dia todo' : shortDay(ev.start) + ', ' + fmtHour(ev.start), ev.location && '📍 ' + ev.location].filter(Boolean).join(' · ');
+  return `<div class="pt ev" data-event="${ev.id}"><span class="ic">📅</span><div class="t"><div class="tt">${esc(ev.title)}</div><div class="s ${soon ? 'soon' + (soon.hot ? ' hot' : '') : ''}">${soon ? '⏳ ' + soon.txt + ' · ' : ''}${esc(sub)}</div></div></div>`;
 }
 function renderPTasks() {
   const box = $('#ptasks'); if (!box) return;
-  const key = t => t.remindAt || (t.due ? t.due + 'T23:59' : '9999');
-  const pend = db.tasks.filter(t => !t.done).sort((a, b) => key(a).localeCompare(key(b)));
-  const closed = !!db.meta.ptasksClosed, show = pend.slice(0, 8), sug = (db.inbox || []).length;
+  const nowIso = localISO(new Date()), today = ymd(new Date()), lim = new Date(); lim.setDate(lim.getDate() + 7); const limIso = ymd(lim) + 'T23:59';
+  const tkey = t => t.remindAt || (t.due ? t.due + 'T23:59' : '9999');
+  const pend = db.tasks.filter(t => !t.done);
+  const evs = db.events.filter(e => (e.allDay ? e.start.slice(0, 10) >= today : (e.end || e.start) >= nowIso) && e.start <= limIso);
+  const items = [...pend.map(t => ({ k: tkey(t), h: () => ptRow(t) })), ...evs.map(e => ({ k: e.allDay ? e.start.slice(0, 10) + 'T00:00' : e.start, h: () => peRow(e) }))].sort((a, b) => a.k.localeCompare(b.k));
+  const closed = !!db.meta.ptasksClosed, show = items.slice(0, 10), sug = (db.inbox || []).length;
   box.classList.toggle('closed', closed);
-  box.innerHTML = `<div class="todo-h"><b>Atividades · ${pend.length}</b><span><button data-view="tasks">ver tudo</button><button data-act="ptasks-toggle" title="Recolher/abrir">${closed ? '▸' : '▾'}</button></span></div>`
+  box.innerHTML = `<div class="todo-h"><b class="lk"><button data-view="agenda" title="Abrir a agenda">Agenda</button> e <button data-view="tasks" title="Abrir todas as atividades">atividades · ${pend.length}</button></b><span><button data-act="ptasks-toggle" title="Recolher/abrir">${closed ? '▸' : '▾'}</button></span></div>`
     + (sug > 1 ? `<div class="sugbar"><span>💡 ${sug} coisas novas esperando sua resposta no chat</span><button data-act="inbox-all">Sim para todas</button></div>` : '')
-    + (pend.length ? show.map(ptRow).join('') + (pend.length > show.length ? `<button class="more" data-view="tasks">+ ${pend.length - show.length} na aba Atividades</button>` : '') : '<div class="sugbar"><span>Nenhuma atividade pendente.</span></div>');
+    + (items.length ? show.map(x => x.h()).join('') + (items.length > show.length ? `<button class="more" data-view="tasks">+ ${items.length - show.length} mais adiante</button>` : '') : '<div class="sugbar"><span>Nada agendado nem pendente.</span></div>');
 }
 function renderSide() {
   const box = $('#sideMsgs'); if (!box) return;
@@ -418,8 +463,8 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { status: { type: 'string', enum: ['pendentes', 'concluidas', 'todas'] } } } },
   { name: 'atualizar_compromisso', description: 'Altera campos de um compromisso existente (remarcar, mudar local, etc.).',
     input_schema: { type: 'object', properties: { id: { type: 'string' }, titulo: { type: 'string' }, inicio: { type: 'string' }, fim: { type: 'string' }, local: { type: 'string' }, observacoes: { type: 'string' } }, required: ['id'] } },
-  { name: 'concluir_atividade', description: 'Marca uma atividade como concluída.',
-    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
+  { name: 'concluir_atividade', description: 'Pergunta ao usuário, num cartão "Isso foi feito?" com Sim/Não, se a atividade foi feita. A atividade só sai da lista quando ele clicar Sim. Diga a ele que deixou a confirmação no cartão; nunca diga que já deu baixa.',
+    input_schema: { type: 'object', properties: { id: { type: 'string' }, motivo: { type: 'string', description: 'Por que parece feita, ex.: "você disse que já enviou"' } }, required: ['id'] } },
   { name: 'excluir_compromisso', description: 'Exclui um compromisso. Só use quando o usuário pedir explicitamente.',
     input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } }
 ];
@@ -488,7 +533,7 @@ async function runTool(name, i, chatId, srcId) {
       if (i.local !== undefined) e.location = i.local; if (i.observacoes !== undefined) e.notes = i.observacoes; if (i.inicio) e.allDay = false; save(); gcalPush(e);
       pushMsg(chatId, { from: 'them', card: { type: 'event', id: e.id } }); return { ok: true, ...evOut(e) };
     }
-    case 'concluir_atividade': { const t = db.tasks.find(x => x.id === i.id); if (!t) return { erro: 'não encontrada' }; t.done = true; save(); return { ok: true }; }
+    case 'concluir_atividade': { const t = db.tasks.find(x => x.id === i.id); if (!t) return { erro: 'não encontrada' }; if (t.done) return { ok: true, aviso: 'já estava concluída' }; askDone(t.id, i.motivo || '', true); return { ok: true, aviso: 'cartão "Isso foi feito?" mostrado; só sai da lista quando ele clicar Sim' }; }
     case 'excluir_compromisso': { if (!db.events.some(e => e.id === i.id)) return { erro: 'não encontrado' }; delEvent(i.id); return { ok: true }; }
   }
   return { erro: 'ferramenta desconhecida' };
@@ -750,6 +795,10 @@ function settingsSheet() {
       <input id="sD" value="${esc(dlInfo.dir || '')}" placeholder="${esc(dlInfo.def || '')}">
       <div class="hint">Tudo o que você baixa no WhatsApp cai aqui, sem perguntar onde salvar (o app guarda uma cópia no Drive, na pasta da conversa). Backup e arquivos de agenda do app também.${dlInfo.error ? ' ⚠️ ' + esc(dlInfo.error) : ''}</div>
       <div class="btns" style="justify-content:flex-start;padding:6px 0 0"><button class="btn" data-act="dl-pick">Escolher pasta</button><button class="btn" data-act="dl-open">Abrir pasta</button>${dlInfo.custom ? '<button class="btn" data-act="dl-reset">Voltar ao padrão</button>' : ''}</div></div>` : ''}
+    <div class="field"><label>Avisos antes do horário</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400"><input type="checkbox" id="sAvD" ${s.avisoDia !== false ? 'checked' : ''} style="width:auto"> Na véspera (24 h antes; só data: às 9 h do dia anterior)</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sAvH" ${s.avisoHora !== false ? 'checked' : ''} style="width:auto"> 1 hora antes (só data: às 8 h do dia)</label>
+      <div class="hint">Vale para atividades com data e para os compromissos da agenda. O aviso aparece no chat da assistente e como notificação.</div></div>
     <div class="field"><label>Avisos no celular</label><button class="btn pri" data-act="notif" style="margin-top:6px">${'Notification' in window && Notification.permission === 'granted' ? '✓ Avisos ativados' : 'Ativar avisos'}</button>
       <div class="hint">O aviso aparece na hora do lembrete com o app aberto ou em segundo plano. Com o app totalmente fechado o celular pode atrasar; para garantia, mande o compromisso pro Google Agenda.</div></div>
     <div class="btns"><button class="btn" data-act="export">Backup (exportar)</button><button class="btn" data-act="import">Restaurar</button></div>
@@ -796,7 +845,7 @@ document.addEventListener('click', async e => {
   if (d.opencal !== undefined) { openCal(true); return; }
   if (d.chat) { openChat(d.chat); return; }
   if (d.gochat) { closeSheet(); openCal(false); openChat(d.gochat); return; }
-  if (d.toggle) { const t = db.tasks.find(x => x.id === d.toggle); t.done = !t.done; save(); render(); if (openChatId) renderMsgs(); if ($('#sheetBg').classList.contains('open') && el.closest('.sheet')) { const evId = t.eventId; if (evId) eventDetail(evId); } return; }
+  if (d.toggle) { const t = db.tasks.find(x => x.id === d.toggle); if (!t.done) { if (e.target.type === 'checkbox') e.target.checked = false; confirmDoneSheet(t.id); return; } t.done = false; save(); render(); if (openChatId) renderMsgs(); if ($('#sheetBg').classList.contains('open') && el.closest('.sheet')) { const evId = t.eventId; if (evId) eventDetail(evId); } return; }
   if (d.gcal) { window.open(gcalUrl(db.events.find(x => x.id === d.gcal)), '_blank'); return; }
   if (d.ics) { downloadIcs(db.events.find(x => x.id === d.ics)); return; }
   if (d.event && !d.act) { eventDetail(d.event); return; }
@@ -832,6 +881,8 @@ document.addEventListener('click', async e => {
     case 'gcal-sync': el.textContent = 'Sincronizando…'; el.disabled = true; await gcalPull(); settingsSheet(); toast('Agenda sincronizada'); break;
     case 'mprev': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCal(); break;
     case 'mnext': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCal(); break;
+    case 'done-yes': { const fromSheet = !!el.closest('.sheet'); doneAnswer(id, true); if (fromSheet) closeSheet(); toast('Feito ✓'); break; }
+    case 'done-no': doneAnswer(id, false); break;
     case 'plan-ok': runPlan(id); break;
     case 'plan-cancel': { const p = db.plans.find(x => x.id === id); if (p) { p.status = 'cancelado'; save(); render(); } break; }
     case 'task-plan': planForTask(id); break;
@@ -873,6 +924,7 @@ document.addEventListener('click', async e => {
       if ($('#sW')) { db.settings.waRead = $('#sW').checked; db.settings.waAuto = $('#sA').checked; db.settings.waSweep = $('#sS').checked; db.settings.driveLog = $('#sL').checked; db.settings.waIgnore = $('#sI').value.trim(); db.settings.profile = $('#sP').value.trim(); db.facts = $('#sF').value.split('\n').map(x => x.trim()).filter(Boolean); }
       if ($('#sD') && dlInfo && $('#sD').value.trim() !== dlInfo.dir) { const v = $('#sD').value.trim(); window.wv1desk.dlSet(v === dlInfo.def ? '' : v).then(r => { dlInfo = r; if (r.error) toast('⚠️ Pasta dos downloads: ' + r.error); }); }
       if ($('#gI')) { db.settings.gcalId = $('#gI').value.trim(); db.settings.gcalSecret = $('#gS').value.trim(); }
+      if ($('#sAvD')) { db.settings.avisoDia = $('#sAvD').checked; db.settings.avisoHora = $('#sAvH').checked; }
       db.settings.myName = $('#sN').value.trim(); db.settings.apiKey = $('#sK').value.trim(); db.settings.model = $('#sM').value.trim() || 'claude-sonnet-5-5';
       save(); closeSheet(); render(); if (openChatId) openChat(openChatId); toast('Salvo'); break;
     case 'export': {
@@ -1125,7 +1177,7 @@ Você lê as mensagens novas do WhatsApp dele ("Eu" = ele) e age como uma secret
    - promessa: ele mesmo se comprometeu ("Eu: mando amanhã", "Eu: vejo e te falo");
    - compromisso: reunião, visita, vistoria, prazo ou entrega com data que envolve ele.
    NÃO entra em "itens": mensagem só informativa, aviso geral de grupo, pedido feito a outra pessoa, tarefa de outro, assunto que ele já respondeu ou resolveu, agradecimento, "ok", "bom dia". Se for informação de trabalho, vai só para "resumos" ou "notas". Na dúvida se o pedido é para ele, não coloque. Cada item vira um cartão que ele precisa aprovar, então seja seletiva: pouco e certo.
-2) Dê baixa no que já foi feito: se as mensagens mostram que ele já cumpriu algo dos pendentes (ex.: "Eu: enviado", "Eu: já paguei"), liste o id em "concluidas".
+2) Feito? Se as mensagens mostram que ele já cumpriu algo dos pendentes (ex.: "Eu: enviado", "Eu: já paguei"), liste o id em "concluidas" com o motivo (o trecho que mostra). O app pergunta a ele "Isso foi feito?" antes de tirar da lista.
 3) Aprenda: fatos úteis e duradouros sobre pessoas, obras, clientes e empresas (quem é quem, papéis, locais, prazos de contrato) vão em "fatos", uma frase curta cada, só se forem novos. Nada de saúde, política, fofoca ou dados sensíveis.
 4) Resuma: para cada conversa com novidade de trabalho (decisão, pedido, número, prazo, combinado), 1 a 3 frases objetivas em "resumos", mesmo sem ação para ele. Conversa só social não entra.
 5) Notas: informação de referência que ele vai querer consultar depois (endereço de obra, número de contrato/processo/ofício, valor combinado, código, horário fixo, decisão fechada) vai em "notas", uma frase curta e completa cada, só se for nova. Notas já existentes:\n${db.notes.trim().slice(-1500) || '(nenhuma)'}
@@ -1149,15 +1201,13 @@ Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '
       const data = await r.json(); if (!r.ok) throw new Error(data?.error?.message || ('HTTP ' + r.status));
       const use = data.content.find(b => b.type === 'tool_use'), out = use?.input || {};
       const novos = (out.itens || []).filter(it => ORIGENS[it.origem]).map(addInbox).filter(Boolean); // triagem: só o que é com ele
-      const baixas = [];
-      for (const c of out.concluidas || []) { const t = db.tasks.find(x => x.id === c.id && !x.done); if (t) { t.done = true; baixas.push(t.title + (c.motivo ? ' (' + c.motivo + ')' : '')); } }
+      for (const c of out.concluidas || []) askDone(c.id, c.motivo ? 'Vi no WhatsApp: ' + c.motivo : 'Pelas mensagens do WhatsApp parece que já foi feito.'); // só sai da lista com o Sim dele
       for (const f of out.fatos || []) { const k = String(f).trim(); if (k && k.length < 200 && !db.facts.some(x => x.toLowerCase() === k.toLowerCase())) db.facts.push(k); }
       if (db.facts.length > 80) db.facts.splice(0, db.facts.length - 80);
       const sums = (out.resumos || []).filter(r => r && r.conversa && r.resumo).map(r => `### ${fmtHour(localISO(now))} — ${r.conversa}\n${String(r.resumo).trim()}`);
       if (sums.length && DESK && db.settings.driveLog !== false) window.wv1desk.summaryAppend({ date: ymd(now), text: sums.join('\n\n') }).then(refreshSums).catch(() => {});
       // proativa: conta o que anotou e avisa na hora o que é urgente
       const lines = [];
-      if (baixas.length) lines.push('✅ Dei baixa: ' + baixas.join('; '));
       const notas = (out.notas || []).filter(addNote);
       if (notas.length) lines.push('📝 Anotei nas notas: ' + notas.join('; '));
       if (lines.length) pushMsg('claude', { from: 'them', text: lines.join('\n\n') });
@@ -1368,13 +1418,24 @@ function tick() {
       notify('⏰ ' + t.title, 'Lembrete do WhatsApp v1');
     }
   }
-  const soon = localISO(new Date(Date.now() + 30 * 60e3));
-  for (const ev of db.events) {
-    if (!ev.notified && !ev.allDay && ev.start <= soon && ev.start >= now.slice(0, 10)) {
-      ev.notified = true; changed = true;
-      if (ev.start >= localISO(new Date(Date.now() - 15 * 60e3))) { pushMsg('claude', { from: 'them', text: `📅 Daqui a pouco (${fmtHour(ev.start)}): ${ev.title}${ev.location ? ' — ' + ev.location : ''}` }); notify('📅 ' + ev.title, `${fmtHour(ev.start)}${ev.location ? ' · ' + ev.location : ''}`); }
+  // avisos antecipados: véspera e 1 hora antes (só data: "vence amanhã" às 9 h da véspera e "vence hoje" às 8 h)
+  for (const t of db.tasks) {
+    if (t.done) continue;
+    for (const w of dueWarnings(t, t.remindAt || t.due, false)) {
+      changed = true; const head = warnHead(w, t.remindAt || t.due, 'task');
+      pushMsg('claude', { from: 'them', card: { type: 'task', id: t.id, remind: !!t.remindAt, soon: head } });
+      notify('⏳ ' + t.title, head);
     }
   }
+  for (const ev of db.events) {
+    for (const w of dueWarnings(ev, ev.start, ev.allDay)) {
+      changed = true; const head = warnHead(w, ev.start, 'event', ev.allDay);
+      pushMsg('claude', { from: 'them', card: { type: 'event', id: ev.id, soon: head } });
+      notify('📅 ' + ev.title, head + (ev.location ? ' · ' + ev.location : ''));
+    }
+  }
+  if (dueWarnings.dirty) { dueWarnings.dirty = false; changed = true; }
+  renderPTasks();
   const today = ymd(new Date());
   const hr = new Date().getHours();
   if (db.meta.digest !== today && hr >= 6) { db.meta.digest = today; changed = true; briefing('manha'); }
@@ -1383,6 +1444,30 @@ function tick() {
   scheduleSweeps();
 }
 
+function warnPoints(when, allDay) {
+  if (when.length > 10 && !allDay) { const at = parseLocal(when).getTime(); return { d1: at - 24 * 3600e3, h1: at - 3600e3, end: at }; }
+  const day = parseLocal(when.slice(0, 10)), d1 = new Date(day), h1 = new Date(day), end = new Date(day);
+  d1.setDate(d1.getDate() - 1); d1.setHours(9, 0, 0, 0); h1.setHours(8, 0, 0, 0); end.setHours(23, 59, 0, 0);
+  return { d1: d1.getTime(), h1: h1.getTime(), end: end.getTime() };
+}
+// devolve os avisos que vencem agora; na primeira vez que vê o item (ou se a data mudou) marca como já dados os que já passaram, para não disparar tudo de uma vez
+function dueWarnings(obj, when, allDay) {
+  if (!when) return [];
+  const key = when + (allDay ? '|d' : ''), now = Date.now(), p = warnPoints(when, allDay);
+  if (!obj.warned || obj.warned.key !== key) { obj.warned = { key, d1: now >= p.d1, h1: now >= p.h1 }; dueWarnings.dirty = true; }
+  const w = obj.warned, out = [];
+  if (!w.h1 && now >= p.h1 && now < p.end) { w.h1 = w.d1 = true; out.push('h1'); }
+  else if (!w.d1 && now >= p.d1 && now < p.h1) { w.d1 = true; out.push('d1'); }
+  return out.filter(k => k === 'd1' ? db.settings.avisoDia !== false : db.settings.avisoHora !== false);
+}
+function warnHead(k, when, kind, allDay) {
+  if (when.length > 10 && !allDay) {
+    if (k === 'h1') { const m = Math.max(1, Math.round((parseLocal(when) - Date.now()) / 60000)); return `⏳ ${m >= 55 ? 'Em 1 hora' : 'Em ' + m + ' min'} (${fmtHour(when)})`; }
+    return `⏳ Chegando: ${fmtDay(when)}, ${fmtHour(when)}`;
+  }
+  if (kind === 'event') return k === 'h1' ? '📅 Hoje (dia todo)' : '📅 Amanhã (dia todo)';
+  return k === 'h1' ? '📌 Vence hoje' : '⏳ Vence amanhã';
+}
 function briefData(kind) {
   const today = ymd(new Date()), tm = new Date(); tm.setDate(tm.getDate() + 1); const tomorrow = ymd(tm);
   const day = kind === 'manha' ? today : tomorrow;

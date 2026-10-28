@@ -1,7 +1,7 @@
 {
-  "ui": "1.8.2",
+  "ui": "1.8.3",
   "desktop": "1.8.2",
-  "notes": "Ícone do WhatsApp. Painel mais limpo: notas no botão 📝, Atividades no alto. Coisa nova vira cartão \"colocar como tarefa?\" com Sim/Não, só para o que pedem ou perguntam a você.",
+  "notes": "Nada sai da lista sem você confirmar (\"Isso foi feito?\"). Avisos na véspera e 1 hora antes de atividades e compromissos. No alto do painel: agenda e atividades em ordem de horário.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",
