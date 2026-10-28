@@ -38,9 +38,22 @@ function targetPath(chat, name, when) {
   return f;
 }
 function saved(f, extra) { win && win.webContents.send('wv1:saved', { file: f, rel: path.relative(path.dirname(baseDir()), f), ...(extra || {}) }); }
-// downloads (WhatsApp e o próprio app) vão para a pasta Downloads do Windows, sem perguntar onde salvar
+// downloads (WhatsApp e o próprio app) vão para uma pasta fixa, sem perguntar onde salvar.
+// Padrão: <Área de Trabalho>\Dowload whas app (C:\Users\tiago\Desktop\Dowload whas app); muda em Configurações.
+const DL_NAME = 'Dowload whas app';
+const dlFile = () => path.join(app.getPath('userData'), 'downloads.json');
+function dlDefault() {
+  const desk = path.join(os.homedir(), 'Desktop');
+  const isDir = d => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
+  if (isDir(desk)) return path.join(desk, DL_NAME);
+  try { return path.join(app.getPath('desktop'), DL_NAME); } catch { return path.join(desk, DL_NAME); }
+}
+let dlDir = '';
+function loadDl() { try { dlDir = String(JSON.parse(fs.readFileSync(dlFile(), 'utf8')).dir || ''); } catch { dlDir = ''; } }
+const dlCurrent = () => dlDir || dlDefault();
 function downloadPath(name) {
-  const dir = app.getPath('downloads'); fs.mkdirSync(dir, { recursive: true });
+  let dir = dlCurrent();
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { console.warn('pasta de downloads:', e.message); dir = app.getPath('downloads'); fs.mkdirSync(dir, { recursive: true }); }
   const ext = path.extname(name), stem = clean(path.basename(name, ext));
   let f = path.join(dir, stem + ext), i = 2;
   while (fs.existsSync(f)) f = path.join(dir, `${stem} (${i++})${ext}`);
@@ -57,6 +70,17 @@ function saveBuffer({ chat, name, buf, when, id }) {
 }
 ipcMain.handle('wv1:drive-set', (_, dir) => { driveDir = dir || detectDrive(); return { dir: driveDir, base: baseDir(), detected: !!driveDir }; });
 ipcMain.handle('wv1:drive-pick', async () => { const r = await dialog.showOpenDialog(win, { title: 'Escolha a pasta do Google Drive', properties: ['openDirectory'] }); return r.canceled ? '' : r.filePaths[0]; });
+ipcMain.handle('wv1:dl-get', () => ({ dir: dlCurrent(), custom: !!dlDir, def: dlDefault() }));
+ipcMain.handle('wv1:dl-set', (_, dir) => {
+  const d = String(dir || '').trim().replace(/^"(.*)"$/, '$1');
+  if (d && !path.isAbsolute(d)) return { dir: dlCurrent(), custom: !!dlDir, def: dlDefault(), error: 'use o caminho completo, ex.: C:\\Users\\tiago\\Desktop\\Dowload whas app' };
+  dlDir = d;
+  try { fs.writeFileSync(dlFile(), JSON.stringify({ dir: dlDir })); } catch {}
+  try { fs.mkdirSync(dlCurrent(), { recursive: true }); } catch (e) { return { dir: dlCurrent(), custom: !!dlDir, def: dlDefault(), error: e.message }; }
+  return { dir: dlCurrent(), custom: !!dlDir, def: dlDefault() };
+});
+ipcMain.handle('wv1:dl-pick', async () => { const r = await dialog.showOpenDialog(win, { title: 'Escolha a pasta dos downloads', defaultPath: dlCurrent(), properties: ['openDirectory', 'createDirectory'] }); return r.canceled ? '' : r.filePaths[0]; });
+ipcMain.handle('wv1:dl-open', () => { try { fs.mkdirSync(dlCurrent(), { recursive: true }); } catch {} shell.openPath(dlCurrent()); });
 ipcMain.handle('wv1:drive-open', () => { fs.mkdirSync(baseDir(), { recursive: true }); shell.openPath(baseDir()); });
 ipcMain.handle('wv1:save-file', (_, d) => { const m = /^data:([^;]+);base64,(.*)$/.exec(d.dataUrl || ''); if (m) saveBuffer({ chat: d.chat, name: d.name, buf: Buffer.from(m[2], 'base64') }); });
 ipcMain.on('wa-chat', (_, name) => { if (name) currentChat = name; });
@@ -306,7 +330,7 @@ app.on('web-contents-created', (_, wc) => {
 });
 
 app.whenReady().then(() => {
-  loadIds();
+  loadIds(); loadDl();
   protocol.handle('app', req => {
     const root = activeRoot();
     const p = path.normalize(path.join(root, decodeURIComponent(new URL(req.url).pathname)));
@@ -317,14 +341,13 @@ app.whenReady().then(() => {
   const ok = ['notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'mediaKeySystem'];
   waSes.setPermissionRequestHandler((_, perm, cb) => cb(ok.includes(perm)));
   waSes.setSpellCheckerLanguages(['pt-BR']);
-  // documentos e mídias que você baixar no WhatsApp vão direto para a pasta, sem perguntar onde salvar
-  // o que você baixa no WhatsApp vai para Downloads; o app guarda uma cópia na pasta do Drive, por conversa
+  // o que você baixa no WhatsApp vai para a pasta dos downloads (Dowload whas app); o app guarda uma cópia no Drive, por conversa
   waSes.on('will-download', (_, item) => toDownloads(item, f => {
     let copy = '';
     try { copy = targetPath(currentChat, path.basename(f)); fs.copyFileSync(f, copy); } catch (e) { console.warn('cópia no Drive:', e.message); }
     saved(copy || f, { downloads: f, name: path.basename(f) });
   }));
-  // backup e .ics do próprio app também vão direto para Downloads
+  // backup e .ics do próprio app vão para a mesma pasta
   session.defaultSession.on('will-download', (_, item) => toDownloads(item, f => saved(f, { downloads: f, name: path.basename(f), appFile: true })));
   createWindow();
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'app/icons/tray.png')));

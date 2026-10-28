@@ -736,6 +736,10 @@ function settingsSheet() {
       <div style="font-size:14px;word-break:break-all">${esc(driveInfo?.base || '…')}</div>
       <div class="hint">${driveInfo?.detected ? 'Google Drive encontrado: fotos das conversas que você abre e documentos que você baixa no WhatsApp vão para cá, separados por conversa, e o Drive sincroniza sozinho.' : '⚠️ Não achei o Google Drive no PC. Instale o "Google Drive para computador" (google.com/drive/download) e reabra o app, ou escolha a pasta. Enquanto isso salvo em Documentos.'}</div>
       <div class="btns" style="justify-content:flex-start;padding:6px 0 0"><button class="btn" data-act="drive-pick">Escolher pasta</button><button class="btn" data-act="drive-open">Abrir pasta</button></div></div>` : ''}
+    ${DESK && dlInfo ? `<div class="field"><label>⬇️ Pasta dos downloads</label>
+      <input id="sD" value="${esc(dlInfo.dir || '')}" placeholder="${esc(dlInfo.def || '')}">
+      <div class="hint">Tudo o que você baixa no WhatsApp cai aqui, sem perguntar onde salvar (o app guarda uma cópia no Drive, na pasta da conversa). Backup e arquivos de agenda do app também.${dlInfo.error ? ' ⚠️ ' + esc(dlInfo.error) : ''}</div>
+      <div class="btns" style="justify-content:flex-start;padding:6px 0 0"><button class="btn" data-act="dl-pick">Escolher pasta</button><button class="btn" data-act="dl-open">Abrir pasta</button>${dlInfo.custom ? '<button class="btn" data-act="dl-reset">Voltar ao padrão</button>' : ''}</div></div>` : ''}
     <div class="field"><label>Avisos no celular</label><button class="btn pri" data-act="notif" style="margin-top:6px">${'Notification' in window && Notification.permission === 'granted' ? '✓ Avisos ativados' : 'Ativar avisos'}</button>
       <div class="hint">O aviso aparece na hora do lembrete com o app aberto ou em segundo plano. Com o app totalmente fechado o celular pode atrasar; para garantia, mande o compromisso pro Google Agenda.</div></div>
     <div class="btns"><button class="btn" data-act="export">Backup (exportar)</button><button class="btn" data-act="import">Restaurar</button></div>
@@ -801,6 +805,9 @@ document.addEventListener('click', async e => {
     case 'close': closeSheet(); break;
     case 'drive-pick': { const d = await window.wv1desk.drivePick(); if (d) { db.settings.driveDir = d; save(); driveInfo = await window.wv1desk.driveSet(d); settingsSheet(); toast('Pasta definida'); } break; }
     case 'drive-open': window.wv1desk.driveOpen(); break;
+    case 'dl-pick': { const d = await window.wv1desk.dlPick(); if (d) { dlInfo = await window.wv1desk.dlSet(d); settingsSheet(); toast(dlInfo.error ? 'Não consegui usar essa pasta' : 'Pasta dos downloads definida'); } break; }
+    case 'dl-open': window.wv1desk.dlOpen(); break;
+    case 'dl-reset': { dlInfo = await window.wv1desk.dlSet(''); settingsSheet(); toast('Downloads de volta para ' + dlInfo.dir); break; }
     case 'gcal-connect': {
       const clientId = $('#gI').value.trim(), clientSecret = $('#gS').value.trim();
       if (!clientId || !clientSecret) return toast('Cole o ID e o segredo do cliente');
@@ -854,6 +861,7 @@ document.addEventListener('click', async e => {
     case 'del-task': db.tasks = db.tasks.filter(x => x.id !== id); save(); closeSheet(); render(); if (openChatId) renderMsgs(); break;
     case 'save-settings':
       if ($('#sW')) { db.settings.waRead = $('#sW').checked; db.settings.waAuto = $('#sA').checked; db.settings.waSweep = $('#sS').checked; db.settings.driveLog = $('#sL').checked; db.settings.waIgnore = $('#sI').value.trim(); db.settings.profile = $('#sP').value.trim(); db.facts = $('#sF').value.split('\n').map(x => x.trim()).filter(Boolean); }
+      if ($('#sD') && dlInfo && $('#sD').value.trim() !== dlInfo.dir) { const v = $('#sD').value.trim(); window.wv1desk.dlSet(v === dlInfo.def ? '' : v).then(r => { dlInfo = r; if (r.error) toast('⚠️ Pasta dos downloads: ' + r.error); }); }
       if ($('#gI')) { db.settings.gcalId = $('#gI').value.trim(); db.settings.gcalSecret = $('#gS').value.trim(); }
       db.settings.myName = $('#sN').value.trim(); db.settings.apiKey = $('#sK').value.trim(); db.settings.model = $('#sM').value.trim() || 'claude-sonnet-5-5';
       save(); closeSheet(); render(); if (openChatId) openChat(openChatId); toast('Salvo'); break;
@@ -1267,7 +1275,8 @@ async function gcalPull() { // traz 7 dias para trás e 90 para a frente; o que 
 }
 
 // ---------- computador: WhatsApp Web dentro do app ----------
-let driveInfo = null;
+let driveInfo = null, dlInfo = null;
+const dlName = p => String(p || '').split(/[\\/]/).filter(Boolean).pop() || 'Downloads';
 const WA_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 function fromWaChat() {
   let c = db.chats.find(x => x.id === 'fromwa');
@@ -1283,10 +1292,11 @@ if (DESK) {
   $('#waPane').appendChild(wv);
   window.wv1desk.onWaUnread(n => { waUnread = n; setBadge($('#waBadge'), n); });
   window.wv1desk.driveSet(db.settings.driveDir || '').then(r => { driveInfo = r; refreshSums(); });
+  if (window.wv1desk.dlGet) window.wv1desk.dlGet().then(r => { dlInfo = r; });
   gcalRefreshStatus().then(() => { if (gcalOn()) gcalPull(); });
   setInterval(gcalPull, 10 * 60e3);
   setInterval(refreshSums, 10 * 60e3);
-  window.wv1desk.onSaved(d => { db.meta.savedCount = (db.meta.savedCount || 0) + 1; save(); toast(d.downloads ? `⬇️ Salvo em Downloads: ${d.name}${d.appFile ? '' : ' (cópia no Drive)'}` : '📁 Salvo: ' + d.rel); });
+  window.wv1desk.onSaved(d => { db.meta.savedCount = (db.meta.savedCount || 0) + 1; save(); toast(d.downloads ? `⬇️ Salvo em ${dlInfo ? dlName(dlInfo.dir) : 'Downloads'}: ${d.name}${d.appFile ? '' : ' (cópia no Drive)'}` : '📁 Salvo: ' + d.rel); });
   waWv = wv;
   wv.addEventListener('ipc-message', e => {
     if (e.channel === 'wa-msgs') ingestWa(e.args[0]);

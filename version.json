@@ -1,7 +1,7 @@
 {
-  "ui": "1.8.0",
-  "desktop": "1.8.0",
-  "notes": "Planos de execução: a assistente monta (mensagem pronta no WhatsApp, compromisso, nota, baixa) e você aprova com \"ok\". Atualização automática. Google Agenda, Atividades e Notas no painel.",
+  "ui": "1.8.1",
+  "desktop": "1.8.1",
+  "notes": "Downloads do WhatsApp agora caem na pasta \"Dowload whas app\" da Área de Trabalho (troca em Configurações). Continua guardando cópia no Drive.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",
@@ -14,5 +14,5 @@
     "icons/tray.png"
   ],
   "installerUrl": "https://raw.githubusercontent.com/tiagoabepplercivil-ai/whatsapp-v1/installer/WhatsApp-v1-Instalador.exe",
-  "sha256": "5bfc3a721ad92996181fed4bf1b35f88849db83f7f10293e28341891993c3d94"
+  "sha256": "7537100f2ab2dc879666d807df1afa4b9cee774c6dc3b3377b0822047ab3eefa"
 }
