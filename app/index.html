@@ -246,6 +246,13 @@ input,textarea,select{font:inherit;color:var(--text)}
 .side .compose{background:var(--panel);padding:8px 10px}
 .side .compose .box{border-radius:10px;min-height:42px;padding-left:12px}
 .side .send{width:42px;height:42px}
+.notes{flex:none;border-bottom:1px solid var(--line);background:#fff8d6;padding:6px 12px 8px}
+.notes-h{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted)}
+.notes-h b{color:var(--text);font-size:14px}
+.notes-h button{color:var(--muted);font-size:16px;width:28px;height:24px}
+.notes textarea{display:block;width:100%;border:0;background:transparent;resize:none;font:inherit;font-size:13.5px;line-height:1.45;color:var(--text);max-height:160px;overflow-y:auto;padding:4px 0 0;outline:none}
+.notes.closed textarea{display:none}
+@media (prefers-color-scheme: dark){ .notes{background:#2b2a1c} }
 .todo{max-height:42%;overflow-y:auto;border-bottom:1px solid var(--line);background:var(--bg);flex:none}
 .todo-h{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;font-size:13px;color:var(--muted)}
 .todo-h b{color:var(--text);font-size:14px}
@@ -323,6 +330,7 @@ input,textarea,select{font:inherit;color:var(--text)}
 <div class="calscrim" id="calScrim"></div>
 <aside class="cal side" id="cal">
   <header class="top"><div class="row"><div class="who"><div class="av" style="background:#d97757;width:38px;height:38px;font-size:15px">✳</div><div style="min-width:0"><div class="n">Assistente</div><div class="st" id="sideStatus">online</div></div></div><button class="icon-btn closecal" id="calClose"><svg viewBox="0 0 24 24"><path d="M19 6.4L17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg></button></div></header>
+  <div class="notes" id="notes"><div class="notes-h"><b>📝 Notas importantes</b><button id="notesToggle" title="Recolher/abrir">▾</button></div><textarea id="notesText" rows="3" placeholder="Anote aqui o que não pode esquecer (endereços, números de contrato, combinados). A assistente também escreve aqui."></textarea></div>
   <div class="todo" id="todo"></div>
   <div class="msgs" id="sideMsgs"></div>
   <div class="compose"><div class="box"><textarea id="sideInput" rows="1" placeholder="Escreva para a assistente"></textarea></div><button class="send" id="sideSend"><svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button></div>

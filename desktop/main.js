@@ -88,6 +88,7 @@ ipcMain.handle('wv1:log-search', (_, { texto, conversa, limite }) => {
   hits.sort((a, b) => b.score - a.score || b.data.localeCompare(a.data));
   return hits.slice(0, limite || 40).map(({ score, ...h }) => h).sort((a, b) => a.data.localeCompare(b.data));
 });
+ipcMain.handle('wv1:notes-save', (_, { text }) => { try { fs.mkdirSync(baseDir(), { recursive: true }); fs.writeFileSync(path.join(baseDir(), 'Notas.md'), '# Notas importantes\n\n' + String(text || '') + '\n'); } catch (e) { console.warn('notas:', e.message); } });
 ipcMain.handle('wv1:summary-recent', (_, { dias, max }) => { // últimos dias de resumos, para a assistente já saber sem procurar
   try {
     const files = fs.readdirSync(sumDir()).filter(x => /^\d{4}-\d{2}-\d{2}\.md$/.test(x)).sort().slice(-(dias || 3));

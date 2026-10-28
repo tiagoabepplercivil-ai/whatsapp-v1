@@ -370,6 +370,8 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { titulo: { type: 'string', description: 'Frase curta e acionável, ex.: "Levar certidão de crisma na secretaria da paróquia"' }, quando: { type: 'string', description: 'YYYY-MM-DDTHH:MM' }, compromisso_id: { type: 'string' } }, required: ['titulo', 'quando'] } },
   { name: 'buscar_conversas', description: 'Procura nas conversas e grupos do usuário (texto das mensagens e descrição/transcrição das fotos) e no histórico completo do WhatsApp guardado no Drive (sem limite de data), inclusive nos resumos diários. Use para responder perguntas sobre algo que ele mandou ou que alguém falou.',
     input_schema: { type: 'object', properties: { texto: { type: 'string', description: 'Palavras-chave (vazio = mensagens mais recentes)' }, conversa: { type: 'string', description: 'Nome da conversa (opcional)' } } } },
+  { name: 'anotar', description: 'Escreve no bloco "Notas importantes" do usuário (topo do painel): informação de referência que ele vai precisar consultar depois — endereço de obra, número de contrato/processo, valor combinado, código, horário fixo, decisão. Não use para tarefas (use criar_atividade) nem compromissos.',
+    input_schema: { type: 'object', properties: { texto: { type: 'string', description: 'Uma frase curta e completa' } }, required: ['texto'] } },
   { name: 'ler_historico', description: 'Lê as últimas mensagens de uma conversa do WhatsApp no histórico completo (arquivo no Drive). Use para "o que o fulano falou", "como ficou aquilo com X", "me atualiza sobre a obra Y".',
     input_schema: { type: 'object', properties: { conversa: { type: 'string', description: 'Nome (ou parte) da conversa ou grupo' }, linhas: { type: 'integer', description: 'Quantas linhas do fim (padrão 60)' } }, required: ['conversa'] } },
   { name: 'vincular_atividade', description: 'Vincula uma atividade existente a um compromisso existente.',
@@ -431,6 +433,7 @@ async function runTool(name, i, chatId, srcId) {
       out.sort((a, b) => a.data.localeCompare(b.data));
       return out.slice(-40);
     }
+    case 'anotar': return addNote(i.texto) ? { ok: true } : { ok: false, motivo: 'já estava anotado ou vazio' };
     case 'ler_historico': return DESK ? await window.wv1desk.logRead({ conversa: i.conversa || '', linhas: i.linhas }) : { erro: 'histórico só no app do computador' };
     case 'registrar_descricao': {
       for (const c of db.chats) { const m = c.messages.find(x => x.id === i.mensagem_id); if (m) { m.desc = i.descricao; save(); return { ok: true }; } }
@@ -466,6 +469,7 @@ function systemPrompt() {
 Para perguntas sobre algo que ele mandou nas conversas (documentos, fotos, datas, nomes), use buscar_conversas antes de responder e cite de qual conversa veio. Para "me lembra de...", use criar_lembrete; se ele não disser a hora, use 08:00 do dia apropriado e avise.
 Perfil dele: ${db.settings.profile || '(não informado)'}
 Memória (pessoas, obras, clientes):\n${db.facts.slice(-60).map(f => '- ' + f).join('\n') || '(nada ainda)'}
+Bloco "Notas importantes" dele (use anotar para acrescentar o que ele vai precisar consultar):\n${db.notes.trim() || '(vazio)'}
 Você também lê o WhatsApp dele: buscar_conversas procura nas conversas do app e no histórico completo do WhatsApp guardado no Drive (todas as conversas lidas, sem limite de data, mais os resumos diários); ler_historico mostra as últimas mensagens de uma conversa. Antes de dizer que não sabe de uma pessoa, obra, valor ou combinado, procure. Seja proativa: se notar atraso, conflito de horário ou algo esquecido, diga e proponha a ação.
 Resumos recentes do WhatsApp dele (últimos dias, escritos por você):\n${recentSums || '(nenhum ainda)'}
 Sugestões do WhatsApp ainda não confirmadas por ele:\n${db.inbox.slice(0, 15).map(x => `- ${x.titulo}${x.quando ? ' (' + x.quando + ')' : ''}`).join('\n') || '(nenhuma)'}
@@ -853,6 +857,21 @@ function findMsg(id) { return db.chats.find(x => x.id === openChatId).messages.f
 $('#sheetBg').addEventListener('click', e => { if (e.target.id === 'sheetBg') closeSheet(); });
 $('#calScrim').addEventListener('click', () => openCal(false));
 $('#calClose').addEventListener('click', () => openCal(false));
+// bloco de notas importantes (topo do painel da assistente): ele escreve, a assistente acrescenta; cópia em Notas.md no Drive
+let notesTimer = null;
+function notesSync() { clearTimeout(notesTimer); notesTimer = setTimeout(() => { if (DESK && window.wv1desk.notesSave) window.wv1desk.notesSave({ text: db.notes }).catch(() => {}); }, 1500); }
+function notesFit() { const t = $('#notesText'); if (!t) return; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 2, 160) + 'px'; }
+function renderNotes() { const t = $('#notesText'); if (!t) return; if (t.value !== db.notes) t.value = db.notes; $('#notes').classList.toggle('closed', !!db.meta.notesClosed); $('#notesToggle').textContent = db.meta.notesClosed ? '▸' : '▾'; notesFit(); }
+function addNote(text) {
+  const t = String(text || '').trim().replace(/^[•\-*]\s*/, ''); if (!t) return false;
+  if (db.notes.toLowerCase().includes(t.toLowerCase())) return false;
+  db.notes = (db.notes.trim() ? db.notes.replace(/\s+$/, '') + '\n' : '') + '• ' + t; save(); renderNotes(); notesSync(); return true;
+}
+if ($('#notesText')) {
+  $('#notesText').addEventListener('input', () => { db.notes = $('#notesText').value; save(); notesFit(); notesSync(); });
+  $('#notesToggle').addEventListener('click', () => { db.meta.notesClosed = !db.meta.notesClosed; save(); renderNotes(); });
+  renderNotes();
+}
 $('#sideSend').addEventListener('click', () => sendSide());
 $('#sideInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSide(); } });
 async function sendSide() {
@@ -899,7 +918,7 @@ if (DESK) {
 }
 
 // ---------- leitura automática do WhatsApp → lista "A fazer" ----------
-db.inbox = db.inbox || []; db.meta.waSeen = db.meta.waSeen || []; db.waLog = db.waLog || []; db.facts = db.facts || [];
+db.inbox = db.inbox || []; db.meta.waSeen = db.meta.waSeen || []; db.waLog = db.waLog || []; db.facts = db.facts || []; if (typeof db.notes !== 'string') db.notes = '';
 if (db.settings.profile === undefined) db.settings.profile = 'Engenheiro civil em Joinville/SC. Trojan Engenharia (projetos, controle tecnológico de pavimentação, investigação geotécnica, supervisão de contratos públicos) e Grupo NEV (sócio da NEV Geotecnia; sócio: Alex Rafael Niepiçuy).';
 const waCtx = {}; db.waLog.slice(-600).forEach(m => { (waCtx[m.chat] = waCtx[m.chat] || []).push(m); });
 let waSweeping = false, waSweepFull = false, manualSweep = false, waWv = null;
@@ -994,6 +1013,7 @@ Você lê as mensagens novas do WhatsApp dele ("Eu" = ele) e age como uma secret
 2) Dê baixa no que já foi feito: se as mensagens mostram que ele já cumpriu algo dos pendentes (ex.: "Eu: enviado", "Eu: já paguei"), liste o id em "concluidas".
 3) Aprenda: fatos úteis e duradouros sobre pessoas, obras, clientes e empresas (quem é quem, papéis, locais, prazos de contrato) vão em "fatos", uma frase curta cada, só se forem novos. Nada de saúde, política, fofoca ou dados sensíveis.
 4) Resuma: para cada conversa com novidade de trabalho (decisão, pedido, número, prazo, combinado), 1 a 3 frases objetivas em "resumos", mesmo sem ação para ele. Conversa só social não entra.
+5) Notas: informação de referência que ele vai querer consultar depois (endereço de obra, número de contrato/processo/ofício, valor combinado, código, horário fixo, decisão fechada) vai em "notas", uma frase curta e completa cada, só se for nova. Notas já existentes:\n${db.notes.trim().slice(-1500) || '(nenhuma)'}
 Ignore conversa social, figurinhas, propaganda, correntes, avisos genéricos de grupo e o que não é com ele. Em grupos grandes, só o que o menciona ou cabe ao papel dele.
 Prioridade: alta = prazo em até 24h, cliente ou órgão público cobrando, dinheiro, ou pergunta a ele sem resposta há mais de 2h; media = prazo nesta semana; baixa = o resto.
 Agora: ${localISO(now)} (${now.toLocaleDateString('pt-BR', { weekday: 'long' })}). Datas relativas contam a partir da hora de cada mensagem; sem hora, use só a data.
@@ -1005,7 +1025,8 @@ Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '
               prioridade: { type: 'string', enum: ['alta', 'media', 'baixa'] }, trecho: { type: 'string', description: 'Trecho da mensagem que originou' }, motivo: { type: 'string', description: 'Uma linha: por que isso importa' } }, required: ['tipo', 'titulo', 'conversa', 'prioridade'] } },
             concluidas: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, motivo: { type: 'string' } }, required: ['id'] } },
             fatos: { type: 'array', items: { type: 'string' } },
-            resumos: { type: 'array', items: { type: 'object', properties: { conversa: { type: 'string' }, resumo: { type: 'string' } }, required: ['conversa', 'resumo'] } } }, required: ['itens'] } }],
+            resumos: { type: 'array', items: { type: 'object', properties: { conversa: { type: 'string' }, resumo: { type: 'string' } }, required: ['conversa', 'resumo'] } },
+            notas: { type: 'array', items: { type: 'string' } } }, required: ['itens'] } }],
           tool_choice: { type: 'tool', name: 'itens_a_fazer' },
           messages: [{ role: 'user', content: txt }] })
       });
@@ -1022,6 +1043,8 @@ Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '
       const lines = [];
       if (novos.length && !db.settings.waAuto) lines.push('📥 Do WhatsApp anotei (confira na lista acima):\n' + novos.map(n => `• ${n.prioridade === 'alta' ? '🔴 ' : ''}${n.titulo}${n.pessoa ? ' — ' + n.pessoa : ''}`).join('\n'));
       if (baixas.length) lines.push('✅ Dei baixa: ' + baixas.join('; '));
+      const notas = (out.notas || []).filter(addNote);
+      if (notas.length) lines.push('📝 Anotei nas notas: ' + notas.join('; '));
       if (lines.length) pushMsg('claude', { from: 'them', text: lines.join('\n\n') });
       const soon = localISO(new Date(Date.now() + 3 * 3600e3));
       novos.filter(n => n.prioridade === 'alta' || (n.quando.length > 10 && n.quando <= soon)).slice(0, 3).forEach(n => notify('📌 ' + n.titulo, (n.pessoa ? n.pessoa + ' · ' : '') + n.conversa));

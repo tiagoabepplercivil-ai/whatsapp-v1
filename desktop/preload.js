@@ -14,5 +14,6 @@ contextBridge.exposeInMainWorld('wv1desk', {
   summaryAppend: d => ipcRenderer.invoke('wv1:summary-append', d),
   logSearch: d => ipcRenderer.invoke('wv1:log-search', d),
   logRead: d => ipcRenderer.invoke('wv1:log-read', d),
-  summaryRecent: d => ipcRenderer.invoke('wv1:summary-recent', d)
+  summaryRecent: d => ipcRenderer.invoke('wv1:summary-recent', d),
+  notesSave: d => ipcRenderer.invoke('wv1:notes-save', d)
 });
