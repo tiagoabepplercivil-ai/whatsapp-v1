@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#008069">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="WhatsApp v1">
+<title>WhatsApp</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+:root{
+  --green:#008069; --green-dark:#005c4b; --accent:#25d366; --teal:#00a884;
+  --bg:#ffffff; --panel:#f0f2f5; --chatbg:#efeae2; --text:#111b21; --muted:#667781;
+  --line:#e9edef; --in:#ffffff; --out:#d9fdd3; --card:#ffffff; --header:#ffffff; --headertext:#111b21; --rail:#f0f2f5; --hover:#f5f6f6; --title:#00a884;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#111b21; --panel:#202c33; --chatbg:#0b141a; --text:#e9edef; --muted:#8696a0;
+    --line:#222d34; --in:#202c33; --out:#005c4b; --card:#202c33; --header:#111b21; --headertext:#e9edef; --rail:#202c33; --hover:#202c33; --title:#00a884; }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:"Segoe UI","Helvetica Neue",Helvetica,"Lucida Grande",Arial,Ubuntu,Cantarell,"Fira Sans",sans-serif;font-size:15px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input,textarea,select{font:inherit;color:var(--text)}
+.app{display:flex;flex-direction:column;height:100dvh;max-width:720px;margin:0 auto;position:relative;overflow:hidden;background:var(--bg)}
+.top{background:var(--header);color:var(--headertext);padding:calc(env(safe-area-inset-top) + 10px) 16px 0}
+.top .row{display:flex;align-items:center;justify-content:space-between;height:44px}
+.top h1{font-size:22px;font-weight:700;margin:0;color:var(--title)}
+.chat .top h1,.cal .top h1{color:inherit}
+.icon-btn{width:40px;height:40px;border-radius:50%;display:grid;place-items:center}
+.icon-btn:hover{background:rgba(0,0,0,.06)}
+.icon-btn svg{width:22px;height:22px;fill:currentColor}
+.tabs{display:flex}
+.tabs button{flex:1;padding:12px 0 10px;font-weight:600;font-size:14px;color:var(--muted);border-bottom:3px solid transparent}
+.tabs button.on{color:var(--green);border-color:var(--teal)}
+.top{border-bottom:1px solid var(--line)}
+.badge{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--accent);color:#fff;font-size:11px;line-height:18px;margin-left:4px}
+.view{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.search{margin:8px 12px 4px;display:flex;align-items:center;background:var(--panel);border-radius:22px;padding:0 14px}
+.search input{flex:1;border:0;background:none;padding:10px 8px;outline:none;font-size:15px}
+.search input::placeholder{color:var(--muted)}
+.item{display:flex;align-items:center;gap:12px;padding:10px 16px;cursor:pointer}
+.item:hover{background:var(--hover)}
+.item.on{background:var(--panel)}
+.ub{display:inline-block;min-width:20px;height:20px;line-height:20px;border-radius:10px;background:var(--accent);color:#fff;font-size:12px;font-weight:600;text-align:center;padding:0 6px;margin-left:6px;flex:none}
+.item .l2{display:flex;align-items:center}
+.item .l2 .pv{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.item .time.unread{color:#1fa855;font-weight:600}
+.av{width:48px;height:48px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font-weight:600;font-size:18px}
+.item .mid{flex:1;min-width:0;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:-10px}
+.item .l1{display:flex;justify-content:space-between;gap:8px}
+.item .name{font-weight:400;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .time{font-size:12px;color:var(--muted);flex:none}
+.item .l2{color:var(--muted);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.pin{color:var(--muted);font-size:12px}
+.fab{position:absolute;right:16px;bottom:calc(env(safe-area-inset-bottom) + 18px);width:56px;height:56px;border-radius:16px;background:var(--teal);color:#fff;display:grid;place-items:center;box-shadow:0 3px 8px rgba(0,0,0,.25);z-index:5}
+.fab svg{width:24px;height:24px;fill:#fff}
+.section{padding:14px 16px 6px;color:var(--teal);font-size:13px;font-weight:600;text-transform:uppercase}
+.empty{padding:40px 24px;text-align:center;color:var(--muted);line-height:1.5}
+.ev{display:flex;gap:12px;padding:10px 16px;cursor:pointer;align-items:flex-start}
+.ev .hr{width:52px;flex:none;color:var(--teal);font-weight:600;font-size:14px;padding-top:2px}
+.ev .body{flex:1;border-left:3px solid var(--teal);padding-left:10px}
+.ev .t{font-weight:500}
+.ev .s{color:var(--muted);font-size:13px;margin-top:2px}
+.task{display:flex;gap:12px;padding:10px 16px;align-items:flex-start}
+.task input{width:20px;height:20px;accent-color:var(--teal);margin-top:2px;flex:none}
+.task .t{flex:1}
+.task.done .t .tt{text-decoration:line-through;color:var(--muted)}
+.task .s{color:var(--muted);font-size:13px;margin-top:2px}
+.chip{display:inline-block;background:var(--panel);border-radius:10px;padding:1px 8px;font-size:12px;color:var(--muted);margin-right:4px}
+.chip.link{color:var(--teal);cursor:pointer}
+.chip.late{color:#ea0038}
+.filters{display:flex;gap:8px;padding:10px 12px 2px;overflow-x:auto}
+.filters button{white-space:nowrap;flex:none}
+.filters button{padding:5px 12px;border-radius:18px;background:transparent;border:1px solid #d1d7db;font-size:14px;color:#54656f;font-weight:500}
+.filters button.on{background:#d9fdd3;border-color:#d9fdd3;color:#008069;font-weight:600}
+.filters button small{opacity:.8;margin-left:3px}
+@media (prefers-color-scheme: dark){ .filters button{border-color:#2a3942;color:#8696a0} .filters button.on{background:#0a332c;border-color:#0a332c;color:#00a884} }
+
+/* tela de conversa */
+.chat{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--chatbg);transform:translateX(100%);transition:transform .22s ease;z-index:10}
+.chat.open{transform:none}
+.chat .top{padding-bottom:6px}
+.chat .top .row{gap:6px;justify-content:flex-start}
+.chat .who{flex:1;min-width:0;display:flex;align-items:center;gap:10px}
+.chat .who .av{width:38px;height:38px;font-size:15px}
+.chat .who .n{font-weight:600;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat .who .st{font-size:13px;color:var(--muted)}
+.chat .who .n{font-weight:500}
+.chat .top{background:var(--panel)}
+.compose{background:var(--panel)}
+.chat-empty{display:none}
+.msgs{flex:1;overflow-y:auto;padding:10px 4% 6px;
+  background-image:radial-gradient(rgba(0,0,0,.035) 1px,transparent 1px);background-size:18px 18px}
+.day{text-align:center;margin:10px 0}
+.day span{background:var(--card);color:var(--muted);font-size:12px;padding:5px 12px;border-radius:8px;box-shadow:0 1px .5px rgba(0,0,0,.13)}
+.b{max-width:82%;padding:6px 8px 8px 9px;border-radius:8px;margin:2px 0;position:relative;box-shadow:0 1px .5px rgba(0,0,0,.13);word-wrap:break-word;white-space:pre-wrap;line-height:1.35;font-size:15px}
+.b.in{background:var(--in);margin-right:auto;border-top-left-radius:0}
+.b.out{background:var(--out);margin-left:auto;border-top-right-radius:0}
+.b .meta{float:right;font-size:11px;color:var(--muted);margin:8px 0 -4px 10px;white-space:nowrap}
+.b .meta .tick{color:#53bdeb}
+.b.sel{outline:2px solid var(--teal)}
+.typing{font-style:italic;color:var(--muted)}
+.card{background:var(--card);border-radius:8px;margin:4px 0 4px;max-width:86%;box-shadow:0 1px .5px rgba(0,0,0,.13);overflow:hidden;white-space:normal}
+.card .ch{background:var(--teal);color:#fff;padding:8px 12px;font-size:13px;font-weight:600;display:flex;gap:6px;align-items:center}
+.card .cb{padding:10px 12px}
+.card .ct{font-weight:600;font-size:15px}
+.card .cs{color:var(--muted);font-size:13px;margin-top:3px}
+.card .acts{display:flex;border-top:1px solid var(--line)}
+.card .acts button{flex:1;padding:10px 4px;color:var(--teal);font-weight:600;font-size:13px;border-right:1px solid var(--line)}
+.card .acts button:last-child{border-right:0}
+.compose{display:flex;align-items:flex-end;gap:6px;padding:6px 6px calc(env(safe-area-inset-bottom) + 6px)}
+.compose .box{flex:1;background:var(--card);border-radius:24px;display:flex;align-items:flex-end;padding:0 6px 0 14px;min-height:48px}
+.compose textarea{flex:1;border:0;background:none;resize:none;outline:none;padding:13px 0;max-height:120px;line-height:1.35}
+.send{width:48px;height:48px;border-radius:50%;background:var(--teal);display:grid;place-items:center;flex:none}
+.send svg{width:22px;height:22px;fill:#fff}
+.quick{display:flex;gap:6px;overflow-x:auto;padding:4px 8px 0}
+.quick button{white-space:nowrap;background:var(--card);border-radius:16px;padding:6px 12px;font-size:13px;color:var(--teal);box-shadow:0 1px .5px rgba(0,0,0,.13)}
+
+/* folhas e menus */
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:50;display:none;align-items:flex-end;justify-content:center}
+.sheet-bg.open{display:flex}
+.sheet{background:var(--bg);width:100%;max-width:720px;border-radius:16px 16px 0 0;padding:8px 0 calc(env(safe-area-inset-bottom) + 12px);max-height:90dvh;overflow-y:auto}
+.sheet h2{font-size:18px;margin:10px 20px 6px}
+.sheet .opt{display:flex;gap:14px;align-items:center;width:100%;text-align:left;padding:14px 20px;font-size:16px}
+.sheet .opt:active{background:var(--panel)}
+.sheet .opt.danger{color:#ea0038}
+.field{padding:6px 20px}
+.field label{display:block;font-size:13px;color:var(--teal);margin-bottom:4px;font-weight:600}
+.field input,.field textarea,.field select{width:100%;padding:10px 0;border:0;border-bottom:2px solid var(--teal);background:none;outline:none}
+.field .hint{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.4}
+.btns{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px 4px;flex-wrap:wrap}
+.btn{padding:10px 18px;border-radius:20px;font-weight:600;color:var(--teal)}
+.btn.pri{background:var(--teal);color:#fff}
+.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#323232;color:#fff;padding:10px 18px;border-radius:20px;font-size:14px;z-index:99;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center}
+.toast.on{opacity:1}
+.banner{margin:8px 12px;padding:10px 12px;border-radius:10px;background:#fff3c4;color:#54400a;font-size:13px;line-height:1.4;display:flex;gap:10px;align-items:center}
+.banner button{color:#008069;font-weight:700;white-space:nowrap}
+@media (prefers-color-scheme: dark){ .banner{background:#3b3315;color:#f5e3a3} }
+
+/* calendário lateral */
+.shell{display:flex;height:100dvh;max-width:1600px;margin:0 auto}
+.shell .app{flex:1;max-width:none;margin:0}
+.cal{width:340px;flex:none;background:var(--bg);border-left:1px solid var(--line);display:flex;flex-direction:column;z-index:40}
+.cal .top{display:flex;align-items:center;justify-content:space-between;padding-bottom:10px}
+.cal .top .row{width:100%}
+.cal .top h1{font-size:18px}
+.mhead{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 4px}
+.mhead b{font-size:16px}
+.mhead button{width:34px;height:34px;border-radius:50%;font-size:18px;color:var(--teal)}
+.grid{display:grid;grid-template-columns:repeat(7,1fr);padding:0 8px;gap:2px;text-align:center}
+.grid .wd{font-size:11px;color:var(--muted);padding:4px 0;text-transform:uppercase}
+.grid .d{aspect-ratio:1;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;cursor:pointer;position:relative}
+.grid .d.out{color:var(--muted);opacity:.45}
+.grid .d.today{color:var(--teal);font-weight:700}
+.grid .d.sel{background:var(--teal);color:#fff;font-weight:700}
+.grid .d .dots{display:flex;gap:2px;position:absolute;bottom:3px}
+.grid .d .dots i{width:5px;height:5px;border-radius:50%;background:var(--teal)}
+.grid .d.sel .dots i{background:#fff}
+.grid .d .dots i.t{background:#ffbc2d}
+.daylist{flex:1;overflow-y:auto;border-top:1px solid var(--line);margin-top:8px}
+.dl-h{display:flex;justify-content:space-between;align-items:center;padding:12px 16px 4px}
+.dl-h b{text-transform:capitalize}
+.dl-h button{color:var(--teal);font-weight:600;font-size:14px}
+.calbtn{display:inline-grid}
+@media (min-width:900px){ .calbtn{display:none!important} .cal .closecal{display:none} }
+@media (max-width:899px){
+  .cal{position:fixed;top:0;right:0;bottom:0;width:min(360px,90vw);transform:translateX(100%);transition:transform .22s ease,visibility .22s;visibility:hidden}
+  .cal.open{transform:none;visibility:visible;box-shadow:-4px 0 16px rgba(0,0,0,.25)}
+  .calscrim{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:39;display:none}
+  .calscrim.open{display:block}
+}
+.b.hasimg{padding:3px 3px 8px}
+.b img.ph{display:block;width:100%;max-width:300px;min-height:80px;border-radius:6px;margin-bottom:4px;background:var(--panel);object-fit:cover;cursor:zoom-in}
+.b.hasimg .meta{margin-right:6px}
+
+/* ===== computador: igual ao WhatsApp Web ===== */
+.rail,.wa{display:none}
+.rbadge{position:absolute;top:2px;right:0;min-width:18px;height:18px;line-height:18px;border-radius:9px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;padding:0 4px;display:none}
+.rbadge.on{display:block}
+@media (min-width:900px){
+  .shell{max-width:none}
+  .rail{display:flex;flex-direction:column;align-items:center;gap:6px;width:64px;flex:none;background:var(--rail);border-right:1px solid var(--line);padding:12px 0}
+  .rb{position:relative;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:#54656f}
+  .rb svg{width:24px;height:24px;fill:currentColor}
+  .rb:hover{background:rgba(0,0,0,.06)}
+  .rb.on{background:#d9dbdf;color:#111b21}
+  @media (prefers-color-scheme: dark){ .rb{color:#aebac1} .rb.on{background:#374248;color:#e9edef} }
+  body:not(.desk) #rbWa,body:not(.desk) #rbUpd,body:not(.desk) #rbUpd + div{display:none}
+  .rdot{position:absolute;top:6px;right:6px;width:10px;height:10px;border-radius:50%;background:var(--accent);display:none;border:2px solid var(--rail)}
+  #rbUpd.has .rdot{display:block}
+  #rbUpd.has{color:var(--teal)}
+  .filters::-webkit-scrollbar,.quick::-webkit-scrollbar{display:none}
+  .listpane .filters{gap:6px}
+  .wa{flex:1;min-width:0;position:relative}
+  .wa webview{position:absolute;inset:0;width:100%;height:100%;border:0}
+  body.view-wa .wa{display:block}
+  body.view-wa .app{display:none}
+  .app{flex-direction:row}
+  .listpane{width:clamp(340px,32%,480px);flex:none;display:flex;flex-direction:column;border-right:1px solid var(--line);position:relative;min-height:0}
+  .listpane .top{border-bottom:0;padding-top:10px}
+  .listpane .tabs{display:none}
+  .listpane .view{min-height:0}
+  .fab{display:none}
+  .newbtn{background:var(--teal);color:#fff;width:38px;height:38px;margin-right:4px}
+  .newbtn:hover{background:#06cf9c}
+  .calbtn,#chatBack{display:none!important}
+  .chat{position:relative;inset:auto;flex:1;min-width:0;transform:none;transition:none;z-index:1}
+  .chat .top{padding:8px 16px;border-bottom:1px solid var(--line)}
+  .chat .top .row{height:44px}
+  .chat:not(.open) > :not(.chat-empty){display:none}
+  .chat:not(.open) .chat-empty{display:flex;flex:1;align-items:center;justify-content:center;text-align:center;background:#f0f2f5;color:var(--muted);border-bottom:6px solid #25d366}
+  @media (prefers-color-scheme: dark){ .chat:not(.open) .chat-empty{background:#222e35} }
+  .chat-empty h2{font-weight:300;font-size:32px;color:var(--text);margin:18px 0 10px}
+  .chat-empty p{max-width:460px;line-height:1.5;font-size:14px}
+  .msgs{padding:16px 7% 8px}
+  .b{max-width:65%;font-size:14.2px}
+  .compose{padding:8px 16px}
+  .compose .box{border-radius:10px;min-height:44px}
+  .quick{background:var(--panel);padding:6px 16px 0}
+  .cal{width:320px;border-left:1px solid var(--line)}
+  .cal .top{border-bottom:1px solid var(--line)}
+  body.nocal .cal{display:none}
+  .sheet-bg{align-items:center}
+  .sheet{border-radius:12px;max-width:560px}
+  .item{padding:0 0 0 14px}
+  .item .av{width:49px;height:49px;margin:8px 0}
+  .item .mid{padding:12px 14px 12px 0;margin:0;border-bottom:1px solid var(--line)}
+}
+
+/* painel lateral da assistente */
+.side{display:flex;flex-direction:column}
+.side .top{background:var(--panel);padding:8px 12px}
+.side .who{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
+.side .who .n{font-weight:500;font-size:16px}
+.side .who .st{font-size:13px;color:var(--muted)}
+.side .msgs{flex:1;min-height:0;background-color:var(--chatbg);padding:10px 12px}
+.side .b{max-width:92%;font-size:14px}
+.side .card{max-width:96%}
+.side .compose{background:var(--panel);padding:8px 10px}
+.side .compose .box{border-radius:10px;min-height:42px;padding-left:12px}
+.side .send{width:42px;height:42px}
+.todo{max-height:42%;overflow-y:auto;border-bottom:1px solid var(--line);background:var(--bg);flex:none}
+.todo-h{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;font-size:13px;color:var(--muted)}
+.todo-h b{color:var(--text);font-size:14px}
+.todo-h button{color:var(--teal);font-weight:600;font-size:13px;white-space:nowrap}
+.todo-i{display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--line)}
+.todo-i .tx{flex:1;min-width:0}
+.todo-i .tt{font-size:14px;font-weight:500}
+.todo-i .ts{font-size:12px;color:var(--muted);margin-top:2px}
+.todo-i .tq{font-size:12px;color:var(--muted);margin-top:3px;font-style:italic;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.todo-i .ta{display:flex;flex-direction:column;gap:4px}
+.todo-i .ta button{width:30px;height:30px;border-radius:50%;font-weight:700}
+.todo-i .ok{background:#d9fdd3;color:#008069}
+.todo-i .no{background:var(--panel);color:var(--muted)}
+@media (min-width:900px){ .cal.side{width:380px} }
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="rail" id="rail">
+  <button class="rb" id="rbUpd" title="Atualizar o app"><svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4l-2.35 2.35z"/></svg><span class="rdot"></span></button>
+  <div style="width:32px;border-top:1px solid #d1d7db;margin:2px 0 4px"></div>
+  <button class="rb" data-view="wa" id="rbWa" title="WhatsApp"><svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.2 2 11.4c0 2.1.7 4 2 5.6L3 21.5l4.8-1.3c1.3.6 2.7.9 4.2.9 5.5 0 10-4.2 10-9.4S17.5 2 12 2zm0 17.2c-1.3 0-2.6-.3-3.7-.9l-.3-.1-2.8.7.7-2.6-.2-.3a7.4 7.4 0 01-1.7-4.6C4 7.3 7.6 4 12 4s8 3.3 8 7.4-3.6 7.8-8 7.8z"/></svg><span class="rbadge" id="waBadge"></span></button>
+  <button class="rb" data-view="chats" title="Assistente e grupos"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 00-8.7 14.9L2 22l5.2-1.3A10 10 0 1012 2zm0 4.5l1.4 3.1 3.1 1.4-3.1 1.4L12 15.5l-1.4-3.1-3.1-1.4 3.1-1.4z"/></svg><span class="rbadge" id="chBadge"></span></button>
+  <button class="rb" data-view="agenda" title="Agenda"><svg viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2zm0 16H5V9h14v11zM7 11h5v5H7z"/></svg></button>
+  <button class="rb" data-view="tasks" title="Atividades e lembretes"><svg viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm-9 14l-5-5 1.4-1.4 3.6 3.6 7.6-7.6L19 8l-9 9z"/></svg><span class="rbadge" id="tkBadge"></span></button>
+  <div style="flex:1"></div>
+  <button class="rb" id="rbCal" title="Mostrar/ocultar assistente"><svg viewBox="0 0 24 24"><path d="M3 5v14h18V5H3zm16 12h-5V7h5v10z"/></svg></button>
+  <button class="rb" data-act="settings" title="Configurações"><svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 000-2l2.1-1.6-2-3.5-2.5 1a7.3 7.3 0 00-1.7-1L15 3.3h-4l-.4 2.6a7.3 7.3 0 00-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 000 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1l.4 2.6h4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5-2.3-1.6zM13 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z" transform="translate(-1 0)"/></svg></button>
+</nav>
+<div class="wa" id="waPane"></div>
+<div class="app" id="app">
+ <div class="listpane">
+  <header class="top">
+    <div class="row">
+      <h1>WhatsApp</h1>
+      <div style="display:flex">
+        <button class="icon-btn newbtn" data-act="new-chat" title="Nova conversa"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
+        <button class="icon-btn" id="btnInstall" title="Instalar" style="display:none"><svg viewBox="0 0 24 24"><path d="M12 16l-5-5h3V4h4v7h3l-5 5zm-7 2h14v2H5z"/></svg></button>
+        <button class="icon-btn calbtn" data-opencal title="Assistente"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 00-8.7 14.9L2 22l5.2-1.3A10 10 0 1012 2zm0 4.5l1.4 3.1 3.1 1.4-3.1 1.4L12 15.5l-1.4-3.1-3.1-1.4 3.1-1.4z"/></svg></button>
+        <button class="icon-btn" id="btnSettings" title="Configurações"><svg viewBox="0 0 24 24"><path d="M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z"/></svg></button>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button data-tab="chats" class="on">Conversas</button>
+      <button data-tab="agenda">Agenda</button>
+      <button data-tab="tasks">Atividades<span class="badge" id="taskBadge" style="display:none"></span></button>
+    </nav>
+  </header>
+  <main class="view" id="view"></main>
+  <button class="fab" id="fab"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
+ </div>
+
+  <section class="chat" id="chat">
+    <div class="chat-empty" id="chatEmpty"><div><svg viewBox="0 0 24 24" width="64" height="64" fill="#8696a0"><path d="M12 2a10 10 0 00-8.7 14.9L2 22l5.2-1.3A10 10 0 1012 2zm0 4.5l1.4 3.1 3.1 1.4-3.1 1.4L12 15.5l-1.4-3.1-3.1-1.4 3.1-1.4z"/></svg><h2>Assistente</h2><p>Escolha uma conversa. O que você mandar nos grupos daqui vira lembrete, compromisso ou atividade.<br>No WhatsApp: clique com o botão direito numa mensagem ou foto → <b>Enviar para a assistente</b>.</p></div></div>
+    <header class="top">
+      <div class="row">
+        <button class="icon-btn" id="chatBack"><svg viewBox="0 0 24 24"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg></button>
+        <div class="who"><div class="av" id="chatAv"></div><div style="min-width:0"><div class="n" id="chatName"></div><div class="st" id="chatStatus"></div></div></div>
+        <button class="icon-btn calbtn" data-opencal title="Calendário"><svg viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2zm0 16H5V9h14v11zM7 11h5v5H7z"/></svg></button>
+        <button class="icon-btn" id="chatMenu"><svg viewBox="0 0 24 24"><path d="M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z"/></svg></button>
+      </div>
+    </header>
+    <div class="msgs" id="msgs"></div>
+    <div class="quick" id="quick"></div>
+    <div class="compose">
+      <div class="box"><textarea id="input" rows="1" placeholder="Mensagem"></textarea><button class="icon-btn" id="attach" title="Foto" style="color:var(--muted);width:44px;height:48px"><svg viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 100-6.4 3.2 3.2 0 000 6.4zM9 2L7.17 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2h-3.17L15 2H9zm3 15a5 5 0 110-10 5 5 0 010 10z"/></svg></button><input type="file" id="file" accept="image/*" multiple hidden></div>
+      <button class="send" id="send"><svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button>
+    </div>
+  </section>
+</div>
+<div class="calscrim" id="calScrim"></div>
+<aside class="cal side" id="cal">
+  <header class="top"><div class="row"><div class="who"><div class="av" style="background:#d97757;width:38px;height:38px;font-size:15px">✳</div><div style="min-width:0"><div class="n">Assistente</div><div class="st" id="sideStatus">online</div></div></div><button class="icon-btn closecal" id="calClose"><svg viewBox="0 0 24 24"><path d="M19 6.4L17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg></button></div></header>
+  <div class="todo" id="todo"></div>
+  <div class="msgs" id="sideMsgs"></div>
+  <div class="compose"><div class="box"><textarea id="sideInput" rows="1" placeholder="Escreva para a assistente"></textarea></div><button class="send" id="sideSend"><svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button></div>
+</aside>
+</div>
+<div class="sheet-bg" id="sheetBg"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "whatsapp-v1",
+  "productName": "WhatsApp v1",
+  "version": "1.4.0",
+  "description": "WhatsApp v1 - chat pessoal com agenda, lembretes e assistente",
+  "author": "Tiago Beppler",
+  "main": "main.js",
+  "build": {
+    "appId": "br.tiago.whatsappv1",
+    "productName": "WhatsApp v1",
+    "files": ["main.js", "preload.js", "wa-preload.js", "app/**/*"],
+    "directories": { "output": "dist" },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }],
+      "icon": "icon.ico",
+      "signAndEditExecutable": true
+    },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true, "shortcutName": "WhatsApp v1", "artifactName": "WhatsApp-v1-Instalador.exe" },
+    "portable": { "artifactName": "WhatsApp-v1-Portatil.exe" }
+  },
+  "devDependencies": { "electron": "33.2.1", "electron-builder": "25.1.8" }
+}

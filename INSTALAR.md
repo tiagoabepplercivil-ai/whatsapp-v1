@@ -1,0 +1,50 @@
+# WhatsApp v1 — como publicar e instalar
+
+## 0. Computador (Windows) — recomendado
+1. Baixe `windows/WhatsApp-v1-Instalador.exe` e execute.
+2. O Windows vai mostrar "O Windows protegeu o computador" (o app não tem assinatura digital paga). Clique em **Mais informações → Executar assim mesmo**.
+3. Escolha a pasta e conclua. Fica o atalho "WhatsApp v1" na Área de Trabalho e no Menu Iniciar.
+- Sem instalar: `WhatsApp-v1-Portatil.exe` abre direto (bom para pendrive). Mesmo aviso do SmartScreen.
+- Fechar no X não encerra: o app vai para a bandeja (perto do relógio) e continua avisando os lembretes. Para sair de verdade: ícone na bandeja → Sair.
+- Ícone na bandeja → "Iniciar com o Windows" para ele abrir sozinho, escondido, ao ligar o PC.
+- Os dados do app de PC ficam no PC (separados do celular). Para levar de um para o outro: ⋮ → Configurações → Backup/Restaurar (as fotos não vão no backup).
+
+## 1. Publicar (uma vez, ~1 min, pelo computador)
+1. Abra https://app.netlify.com/projects/wv1-chat-agenda-tb/deploys (projeto já criado na sua conta Netlify).
+2. Arraste o arquivo `whatsapp-v1.zip` (descompactado: a pasta com index.html, app.js, sw.js, manifest e icons) para a área "Drag and drop".
+3. O app fica em https://wv1-chat-agenda-tb.netlify.app
+
+Para atualizar depois: arraste a pasta nova no mesmo lugar.
+
+## 2. Instalar no celular
+- **Android (Chrome):** abra o link → menu ⋮ → "Instalar app" (ou "Adicionar à tela inicial").
+- **iPhone (Safari):** abra o link → Compartilhar → "Adicionar à Tela de Início".
+
+## 3. Ligar o Claude
+- No app: ⋮ → Configurações → cole a chave da API (console.anthropic.com → API Keys). Uso cobrado por token na sua conta Anthropic.
+- Sem chave, o Claude funciona em "modo básico": entende "reunião com Alex amanhã 14h", "vistoria sexta 9h30", "tarefa: enviar laudo dia 05/11".
+
+## Assistente (novo)
+- Crie grupos/conversas (+ → 👥 Grupo) e mande texto e fotos (📷 na caixa de mensagem).
+- A assistente lê cada mensagem e foto (👁 aparece na mensagem lida), transcreve documentos e cria lembretes 🔔, compromissos e atividades. Ela avisa no chat "Assistente" o que anotou.
+- No chat Assistente: "📖 Ler todas as conversas", "Meus lembretes", ou perguntas como "qual a data da minha crisma?" (ela busca nas conversas e fotos).
+- Na hora do lembrete: cartão vermelho no chat + aviso no celular (ative em ⋮ → Configurações → Ativar avisos). Todo dia, ao abrir o app, ela manda o resumo do dia.
+- Por conversa (⋮): ligar/desligar a leitura, ou mandar reler tudo.
+- Ela só lê as conversas DO WhatsApp v1. Não tem acesso ao WhatsApp real (a Meta não permite). Para usar algo do WhatsApp real, encaminhe/salve a foto e mande aqui.
+- Sem chave da API: ela só cria lembretes quando a mensagem tem data e hora simples ("levar documento sexta 10h"). Fotos só são lidas com a chave.
+
+## O que tem
+- Conversas no visual WhatsApp (claro/escuro automático), conversa fixa com o Claude.
+- Calendário lateral com os compromissos: fixo ao lado no tablet/PC; no celular, botão 📅 no topo abre a gaveta.
+- Agenda e Atividades; atividades vinculadas a compromissos.
+- Tocar numa mensagem: virar atividade, criar compromisso, ou mandar o Claude agendar.
+- Cada compromisso: botão "Google Agenda" (abre o evento preenchido) e ".ics" (lembrete de 30 min).
+- Backup/restauração em Configurações.
+
+## Limites da v1
+- Dados ficam no aparelho (texto em localStorage, fotos em IndexedDB; o backup não inclui as fotos). Não sincroniza entre celular e PC — use Backup/Restaurar.
+- Não troca mensagens com outras pessoas (precisaria de servidor). Grupos e conversas são seus, para organizar por assunto.
+- Aviso com o app totalmente fechado: o celular pode atrasar ou segurar. Para o que é crítico, mande também pro Google Agenda.
+- Custo: cada leitura de mensagem/foto é uma chamada à API (fotos custam mais).
+- Envio ao Google Agenda é por link (você confirma "Salvar"); sincronização automática exigiria login Google (OAuth) — fica para a v2.
+- Nome/visual "WhatsApp" é marca da Meta: ok para uso pessoal, não publicar em loja.
