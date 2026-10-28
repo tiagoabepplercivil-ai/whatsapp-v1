@@ -165,6 +165,52 @@ async function sweep(o) {
 
 ipcRenderer.on('wa-sweep', (_, o) => { o = o || {}; if (o.cancel) { cancel = true; return; } sweep(o); });
 
+// ---------- envio: abre a conversa, digita e envia (só roda quando o usuário aprovou um plano no app) ----------
+const normTxt = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+async function findAndOpen(name) {
+  const want = normTxt(name);
+  if (!want) return false;
+  if (normTxt(chatName()) === want) return true;
+  const pane = $('#pane-side'); if (!pane) return false;
+  const match = () => listRows().find(r => normTxt(r.name) === want) || listRows().find(r => normTxt(r.name).includes(want));
+  const origTop = pane.scrollTop;
+  let r = match();
+  if (!r) { pane.scrollTop = 0; await sleep(250); for (let i = 0; i < 40 && !(r = match()); i++) { const b = pane.scrollTop; pane.scrollTop = b + pane.clientHeight * 0.8; await sleep(300); if (pane.scrollTop === b) break; } }
+  if (!r) { pane.scrollTop = origTop; return false; }
+  return openChat(r.name);
+}
+const composer = () => $('#main footer div[contenteditable="true"]') || $('#main [role="textbox"][contenteditable="true"]');
+async function typeInto(box, text) {
+  box.focus();
+  document.execCommand('selectAll', false, null); document.execCommand('delete', false, null);
+  document.execCommand('insertText', false, text);
+  await sleep(250);
+  if (normTxt(box.innerText) === normTxt(text)) return true;
+  box.focus(); const dt = new DataTransfer(); dt.setData('text/plain', text); // o editor não aceitou: tenta como colagem
+  box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  await sleep(400);
+  return normTxt(box.innerText) === normTxt(text);
+}
+async function sendTo(chat, text) {
+  if (sweeping) { cancel = true; for (let i = 0; i < 40 && sweeping; i++) await sleep(250); }
+  if (!(await findAndOpen(chat))) return { ok: false, erro: 'não achei a conversa "' + chat + '" na lista do WhatsApp' };
+  await sleep(500);
+  const box = composer(); if (!box) return { ok: false, erro: 'caixa de mensagem não encontrada' };
+  if (!(await typeInto(box, text))) return { ok: false, erro: 'não consegui digitar na caixa de mensagem' };
+  const btn = $('#main footer button[aria-label="Enviar"], #main footer [data-icon="send"], #main footer button[aria-label="Send"]');
+  if (btn) (btn.closest('button') || btn).click();
+  else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+  for (let i = 0; i < 40; i++) { // confirma: a mensagem aparece como enviada e a caixa esvaziou
+    await sleep(250);
+    const rows = $$('#main div[data-id^="true_"]'), last = rows[rows.length - 1];
+    const t = last ? ((last.querySelector('.selectable-text') || last).innerText || '') : '';
+    const b = composer();
+    if (normTxt(t) === normTxt(text) && !(b && normTxt(b.innerText))) return { ok: true, conversa: chatName() };
+  }
+  return { ok: false, erro: 'não confirmei o envio; confira na conversa ' + chatName() };
+}
+ipcRenderer.on('wa-send', async (_, o) => { o = o || {}; let r; try { r = await sendTo(o.chat, o.text); } catch (e) { r = { ok: false, erro: e.message }; } ipcRenderer.sendToHost('wa-sent', { id: o.id, ...r }); });
+
 setInterval(() => {
   if (sweeping) return;
   try {

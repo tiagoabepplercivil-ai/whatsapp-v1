@@ -1,7 +1,7 @@
 {
-  "ui": "1.7.0",
-  "desktop": "1.7.0",
-  "notes": "Google Agenda de verdade (compromissos vão e vêm da sua agenda), bloco Atividades e Notas importantes no painel da assistente, leitura completa do WhatsApp e histórico no Drive.",
+  "ui": "1.8.0",
+  "desktop": "1.8.0",
+  "notes": "Planos de execução: a assistente monta (mensagem pronta no WhatsApp, compromisso, nota, baixa) e você aprova com \"ok\". Atualização automática. Google Agenda, Atividades e Notas no painel.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",
@@ -12,5 +12,7 @@
     "icons/icon-192.png",
     "icons/icon-512.png",
     "icons/tray.png"
-  ]
+  ],
+  "installerUrl": "https://raw.githubusercontent.com/tiagoabepplercivil-ai/whatsapp-v1/installer/WhatsApp-v1-Instalador.exe",
+  "sha256": "5bfc3a721ad92996181fed4bf1b35f88849db83f7f10293e28341891993c3d94"
 }

@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
 const http = require('http');
+const { spawn } = require('child_process');
 const crypto = require('crypto');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
@@ -36,7 +37,20 @@ function targetPath(chat, name, when) {
   while (fs.existsSync(f)) f = path.join(dir, `${stamp(when || new Date())} - ${stem} (${i++})${ext}`);
   return f;
 }
-function saved(f) { win && win.webContents.send('wv1:saved', { file: f, rel: path.relative(path.dirname(baseDir()), f) }); }
+function saved(f, extra) { win && win.webContents.send('wv1:saved', { file: f, rel: path.relative(path.dirname(baseDir()), f), ...(extra || {}) }); }
+// downloads (WhatsApp e o próprio app) vão para a pasta Downloads do Windows, sem perguntar onde salvar
+function downloadPath(name) {
+  const dir = app.getPath('downloads'); fs.mkdirSync(dir, { recursive: true });
+  const ext = path.extname(name), stem = clean(path.basename(name, ext));
+  let f = path.join(dir, stem + ext), i = 2;
+  while (fs.existsSync(f)) f = path.join(dir, `${stem} (${i++})${ext}`);
+  return f;
+}
+function toDownloads(item, onDone) {
+  const f = downloadPath(item.getFilename() || 'arquivo');
+  item.setSavePath(f);
+  item.once('done', (_, state) => { if (state === 'completed') onDone(f); });
+}
 function saveBuffer({ chat, name, buf, when, id }) {
   if (id) { if (savedIds.has(id)) return; savedIds.add(id); persistIds(); }
   try { const f = targetPath(chat, name, when ? new Date(when) : null); fs.writeFileSync(f, Buffer.from(buf)); saved(f); } catch (e) { console.warn('salvar arquivo:', e.message); }
@@ -90,6 +104,7 @@ ipcMain.handle('wv1:log-search', (_, { texto, conversa, limite }) => {
   hits.sort((a, b) => b.score - a.score || b.data.localeCompare(a.data));
   return hits.slice(0, limite || 40).map(({ score, ...h }) => h).sort((a, b) => a.data.localeCompare(b.data));
 });
+ipcMain.handle('wv1:doc-write', (_, { name, text }) => { try { fs.mkdirSync(baseDir(), { recursive: true }); fs.writeFileSync(path.join(baseDir(), clean(name) + '.md'), String(text || '')); return { ok: true }; } catch (e) { return { error: e.message }; } });
 ipcMain.handle('wv1:notes-save', (_, { text }) => { try { fs.mkdirSync(baseDir(), { recursive: true }); fs.writeFileSync(path.join(baseDir(), 'Notas.md'), '# Notas importantes\n\n' + String(text || '') + '\n'); } catch (e) { console.warn('notas:', e.message); } });
 ipcMain.handle('wv1:summary-recent', (_, { dias, max }) => { // últimos dias de resumos, para a assistente já saber sem procurar
   try {
@@ -182,13 +197,14 @@ ipcMain.handle('wv1:update-check', async () => {
   const current = verOf(activeRoot());
   try {
     const v = await fetchJson(UPDATE_BASE + 'version.json');
-    return { current, latest: v.ui, notes: v.notes || '', available: cmp(v.ui, current) > 0, desktopNeeded: cmp(v.desktop || '0', app.getVersion()) > 0 };
+    const desktopNeeded = cmp(v.desktop || '0', app.getVersion()) > 0;
+    return { current, latest: desktopNeeded ? v.desktop : v.ui, notes: v.notes || '', available: cmp(v.ui, current) > 0 || desktopNeeded, desktopNeeded };
   } catch (e) { return { current, error: e.message }; }
 });
 ipcMain.handle('wv1:update-apply', async () => {
   try {
     const v = await fetchJson(UPDATE_BASE + 'version.json');
-    if (cmp(v.desktop || '0', app.getVersion()) > 0) { shell.openExternal(v.installer || 'https://github.com/tiagoabepplercivil-ai/whatsapp-v1/releases/latest'); return { ok: true }; }
+    if (cmp(v.desktop || '0', app.getVersion()) > 0) return { error: 'esta versão precisa do instalador (baixado automaticamente)', desktopNeeded: true };
     const tmp = uiDir() + '.new'; fs.rmSync(tmp, { recursive: true, force: true });
     for (const f of [...(v.files || []), 'version.json']) {
       const r = await net.fetch(UPDATE_BASE + 'app/' + f + '?t=' + Date.now(), { cache: 'no-store' });
@@ -199,6 +215,47 @@ ipcMain.handle('wv1:update-apply', async () => {
     if (!fs.existsSync(path.join(tmp, 'index.html'))) throw new Error('pacote incompleto');
     fs.rmSync(uiDir(), { recursive: true, force: true }); fs.renameSync(tmp, uiDir());
     win.webContents.reloadIgnoringCache();
+    return { ok: true };
+  } catch (e) { return { error: e.message }; }
+});
+// instalador novo: baixa em segundo plano para a pasta temporária (confere o sha256) e instala em silêncio quando a interface mandar
+let dlState = { status: 'idle' };
+const sha256File = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+ipcMain.handle('wv1:update-download', async () => {
+  if (dlState.status === 'downloading') return dlState;
+  try {
+    const v = await fetchJson(UPDATE_BASE + 'version.json');
+    if (cmp(v.desktop || '0', app.getVersion()) <= 0) return (dlState = { status: 'idle' });
+    if (!v.installerUrl) throw new Error('version.json sem installerUrl');
+    const dir = path.join(app.getPath('temp'), 'whatsapp-v1-update'); fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `WhatsApp-v1-${v.desktop}.exe`);
+    if (fs.existsSync(file) && (!v.sha256 || sha256File(file) === v.sha256)) return (dlState = { status: 'ready', file, version: v.desktop, notes: v.notes || '' });
+    dlState = { status: 'downloading', version: v.desktop, pct: 0 };
+    const r = await net.fetch(v.installerUrl + (v.installerUrl.includes('?') ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const total = +r.headers.get('content-length') || 0; let got = 0, lastPct = -1;
+    const tmp = file + '.part', out = fs.createWriteStream(tmp);
+    for await (const chunk of r.body) {
+      if (!out.write(Buffer.from(chunk))) await new Promise(res => out.once('drain', res));
+      got += chunk.length;
+      if (total) { dlState.pct = Math.round(got * 100 / total); if (dlState.pct !== lastPct) { lastPct = dlState.pct; win && win.webContents.send('wv1:update-progress', dlState); } }
+    }
+    await new Promise((res, rej) => out.end(e => e ? rej(e) : res()));
+    if (v.sha256 && sha256File(tmp) !== v.sha256) { fs.rmSync(tmp, { force: true }); throw new Error('o arquivo baixado não confere (sha256)'); }
+    fs.renameSync(tmp, file);
+    for (const f of fs.readdirSync(dir)) if (f !== path.basename(file)) fs.rmSync(path.join(dir, f), { force: true });
+    dlState = { status: 'ready', file, version: v.desktop, notes: v.notes || '' };
+  } catch (e) { dlState = { status: 'error', error: e.message }; }
+  win && win.webContents.send('wv1:update-progress', dlState);
+  return dlState;
+});
+ipcMain.handle('wv1:update-install', () => {
+  if (dlState.status !== 'ready') return { error: 'o instalador ainda não foi baixado' };
+  try {
+    const child = spawn(dlState.file, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true });
+    child.on('error', e => { dlState = { status: 'error', error: e.message }; win && win.webContents.send('wv1:update-progress', dlState); });
+    child.unref();
+    setTimeout(() => { if (dlState.status === 'ready') { quitting = true; app.quit(); } }, 1500);
     return { ok: true };
   } catch (e) { return { error: e.message }; }
 });
@@ -261,11 +318,14 @@ app.whenReady().then(() => {
   waSes.setPermissionRequestHandler((_, perm, cb) => cb(ok.includes(perm)));
   waSes.setSpellCheckerLanguages(['pt-BR']);
   // documentos e mídias que você baixar no WhatsApp vão direto para a pasta, sem perguntar onde salvar
-  waSes.on('will-download', (_, item) => {
-    const f = targetPath(currentChat, item.getFilename() || 'arquivo');
-    item.setSavePath(f);
-    item.once('done', (_, state) => { if (state === 'completed') saved(f); });
-  });
+  // o que você baixa no WhatsApp vai para Downloads; o app guarda uma cópia na pasta do Drive, por conversa
+  waSes.on('will-download', (_, item) => toDownloads(item, f => {
+    let copy = '';
+    try { copy = targetPath(currentChat, path.basename(f)); fs.copyFileSync(f, copy); } catch (e) { console.warn('cópia no Drive:', e.message); }
+    saved(copy || f, { downloads: f, name: path.basename(f) });
+  }));
+  // backup e .ics do próprio app também vão direto para Downloads
+  session.defaultSession.on('will-download', (_, item) => toDownloads(item, f => saved(f, { downloads: f, name: path.basename(f), appFile: true })));
   createWindow();
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'app/icons/tray.png')));
   tray.setToolTip('WhatsApp');

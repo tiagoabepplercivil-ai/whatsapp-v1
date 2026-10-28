@@ -24,6 +24,12 @@ Para atualizar depois: arraste a pasta nova no mesmo lugar.
 - No app: ⋮ → Configurações → cole a chave da API (console.anthropic.com → API Keys). Uso cobrado por token na sua conta Anthropic.
 - Sem chave, o Claude funciona em "modo básico": entende "reunião com Alex amanhã 14h", "vistoria sexta 9h30", "tarefa: enviar laudo dia 05/11".
 
+## Atualização automática (computador)
+A partir da 1.8.0 o app verifica sozinho ao abrir e a cada 4 h. Melhoria só na interface: aplica em segundos. Versão nova do instalador: baixa em segundo plano (confere o sha256) e instala em silêncio quando você está há 5 min sem usar o app (ou com a janela escondida); se estiver em uso, aparece "Reiniciar para atualizar" de um clique. O instalador fica publicado no ramo `installer` deste repositório.
+
+## Planos de execução ("ok" e ela faz)
+Em cada atividade pendente do painel há "⚡ preparar execução": a assistente monta um plano (mensagem pronta para a pessoa certa no WhatsApp, compromisso, lembrete, nota, baixa na atividade) e mostra o cartão. Você responde **ok** (ou clica em "Ok, pode fazer") e o app executa: digita e envia a mensagem na conversa pelo WhatsApp que está dentro do app, cria o compromisso (vai para a Google Agenda se conectada), anota e dá baixa. Nada é enviado sem o seu ok. Quando você aceita um "Responder fulano" da lista A fazer, a resposta já vem pronta para o ok. O manual (pendentes com seus planos, planos executados, concluídas) fica em `WhatsApp v1/Atividades.md` no Drive.
+
 ## Google Agenda (computador) — cadastro único, uns 8 cliques
 O Google só deixa um programa mexer na sua agenda se ele estiver cadastrado na sua conta. É de graça e você faz uma vez:
 1. Abra https://console.cloud.google.com e entre com a conta Google da sua agenda.
@@ -44,6 +50,7 @@ Depois disso: compromissos criados no app (por você ou pela assistente) aparece
 - Por conversa (⋮): ligar/desligar a leitura, ou mandar reler tudo.
 - No computador ela lê o WhatsApp Web que está dentro do app: a conversa aberta, as prévias das não lidas e, quando você não está usando (90 s parado) ou está em outra aba do app, abre cada conversa não lida para ler (e todas, a cada 2 h). Abrir marca a conversa como lida no WhatsApp (visto azul, se ativo). Desligue em ⋮ → Configurações → "Ler tudo". "📖 Ler todo o WhatsApp" no chat da assistente força a leitura agora.
 - No topo do painel dela há o bloco "📝 Notas importantes": você escreve o que não pode esquecer e ela também anota ali o que encontra nas conversas (endereço, nº de contrato, valor combinado, código). Cópia em `WhatsApp v1/Notas.md` no Drive.
+- Documentos que você baixa no WhatsApp (e o backup/.ics do app) vão direto para a pasta **Downloads** do Windows, sem perguntar onde salvar; o app guarda uma cópia em `WhatsApp v1/<conversa>/` no Drive. Fotos das conversas abertas vão só para o Drive.
 - Tudo que ela lê fica no Drive: `WhatsApp v1/Conversas/<conversa>.md` (texto por dia) e `WhatsApp v1/Resumos/AAAA-MM-DD.md` (resumos dela). Ela busca nesses arquivos ao responder, e os resumos dos últimos 3 dias já ficam no contexto dela.
 - Sem chave da API: ela só cria lembretes quando a mensagem tem data e hora simples ("levar documento sexta 10h"). Fotos só são lidas com a chave.
 

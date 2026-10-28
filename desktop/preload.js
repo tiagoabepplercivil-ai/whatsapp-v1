@@ -19,5 +19,9 @@ contextBridge.exposeInMainWorld('wv1desk', {
   gcalStatus: () => ipcRenderer.invoke('wv1:gcal-status'),
   gcalConnect: d => ipcRenderer.invoke('wv1:gcal-connect', d),
   gcalDisconnect: () => ipcRenderer.invoke('wv1:gcal-disconnect'),
-  gcal: d => ipcRenderer.invoke('wv1:gcal', d)
+  gcal: d => ipcRenderer.invoke('wv1:gcal', d),
+  docWrite: d => ipcRenderer.invoke('wv1:doc-write', d),
+  updateDownload: () => ipcRenderer.invoke('wv1:update-download'),
+  updateInstall: () => ipcRenderer.invoke('wv1:update-install'),
+  onUpdateProgress: cb => ipcRenderer.on('wv1:update-progress', (_, d) => cb(d))
 });

@@ -126,6 +126,7 @@ function sortedEvents() { return [...db.events].sort((a, b) => a.start.localeCom
 // ---------- render: lista principal ----------
 function setBadge(el, n) { el.textContent = n > 99 ? '99+' : n; el.classList.toggle('on', n > 0); }
 function render() {
+  scheduleManual();
   if (tab === 'wa' && !DESK) tab = 'chats';
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   document.querySelectorAll('.rb[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === tab));
@@ -170,6 +171,7 @@ function renderChats() {
   return h + '<div style="height:90px"></div>';
 }
 function cardTitle(card) {
+  if (card.type === 'plan') return 'Plano: ' + (db.plans.find(p => p.id === card.id)?.titulo || '');
   if (card.type === 'event') return db.events.find(e => e.id === card.id)?.title || 'Compromisso removido';
   return db.tasks.find(t => t.id === card.id)?.title || 'Atividade removida';
 }
@@ -265,6 +267,16 @@ function chatStatus(c) {
 function closeChat() { openChatId = null; $('#chat').classList.remove('open'); render(); }
 
 function cardHtml(card) {
+  if (card.type === 'plan') {
+    const p = db.plans.find(x => x.id === card.id);
+    if (!p) return `<div class="card"><div class="cb cs">Plano removido</div></div>`;
+    const acts = p.status === 'aguardando_ok' ? `<button class="ok" data-act="plan-ok" data-id="${p.id}">✅ Ok, pode fazer</button><button data-act="plan-cancel" data-id="${p.id}">Cancelar</button>`
+      : p.status === 'executando' ? '<span class="cs">executando…</span>' : p.status === 'erro' ? `<button data-act="plan-ok" data-id="${p.id}">Tentar de novo</button><button data-act="plan-cancel" data-id="${p.id}">Cancelar</button>`
+      : p.status === 'feito' ? '<span class="cs">✓ concluído</span>' : '<span class="cs">cancelado</span>';
+    return `<div class="card"><div class="ch" style="background:#1d4ed8;color:#fff">🗂 ${p.status === 'feito' ? 'Feito' : p.status === 'aguardando_ok' ? 'Plano — diga "ok" para eu fazer' : 'Plano'}: ${esc(p.titulo)}</div><div class="cb">
+      ${p.passos.map(st => `<div class="cs st-${st.status}">${st.status === 'feito' ? '✓' : st.status === 'erro' ? '⚠' : '○'} ${STEP_ICON[st.tipo] || '•'} ${esc(stepText(st))}${st.erro ? ' — ' + esc(st.erro) : ''}</div>`).join('')}</div>
+      <div class="acts">${acts}</div></div>`;
+  }
   if (card.type === 'event') {
     const ev = db.events.find(e => e.id === card.id);
     if (!ev) return `<div class="card"><div class="cb cs">Compromisso removido</div></div>`;
@@ -309,7 +321,7 @@ function renderPTasks() {
   const closed = !!db.meta.ptasksClosed, show = pend.slice(0, 8);
   box.classList.toggle('closed', closed);
   box.innerHTML = `<div class="todo-h"><b>☑️ Atividades · ${pend.length}</b><span><button data-view="tasks">ver tudo</button><button data-act="ptasks-toggle" title="Recolher/abrir">${closed ? '▸' : '▾'}</button></span></div>`
-    + (pend.length ? show.map(taskRow).join('') + (pend.length > show.length ? `<button class="more" data-view="tasks">+ ${pend.length - show.length} na aba Atividades</button>` : '') : '<div class="todo-h"><span>Nenhuma atividade pendente.</span></div>');
+    + (pend.length ? show.map(t => taskRow(t).replace('</div></div>', `${db.plans.some(p => p.taskId === t.id && p.status === 'aguardando_ok') ? '<div class="pl">🗂 plano aguardando seu ok</div>' : `<div class="pl" data-act="task-plan" data-id="${t.id}">⚡ preparar execução</div>`}</div></div>`)).join('') + (pend.length > show.length ? `<button class="more" data-view="tasks">+ ${pend.length - show.length} na aba Atividades</button>` : '') : '<div class="todo-h"><span>Nenhuma atividade pendente.</span></div>');
 }
 function renderSide() {
   const box = $('#sideMsgs'); if (!box) return;
@@ -381,6 +393,9 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { titulo: { type: 'string', description: 'Frase curta e acionável, ex.: "Levar certidão de crisma na secretaria da paróquia"' }, quando: { type: 'string', description: 'YYYY-MM-DDTHH:MM' }, compromisso_id: { type: 'string' } }, required: ['titulo', 'quando'] } },
   { name: 'buscar_conversas', description: 'Procura nas conversas e grupos do usuário (texto das mensagens e descrição/transcrição das fotos) e no histórico completo do WhatsApp guardado no Drive (sem limite de data), inclusive nos resumos diários. Use para responder perguntas sobre algo que ele mandou ou que alguém falou.',
     input_schema: { type: 'object', properties: { texto: { type: 'string', description: 'Palavras-chave (vazio = mensagens mais recentes)' }, conversa: { type: 'string', description: 'Nome da conversa (opcional)' } } } },
+  { name: 'preparar_plano', description: 'Monta o plano de execução de uma atividade e mostra um cartão para o usuário aprovar com "ok". NADA é executado sem o ok dele. Use quando ele pedir para resolver/responder/cobrar/marcar/avisar algo, ou quando uma atividade puder ser resolvida com uma mensagem no WhatsApp. Passos: whatsapp (conversa = nome exatamente como na lista do WhatsApp; mensagem pronta em primeira pessoa, no tom dele: direto, educado, sem floreio), compromisso, lembrete, nota, concluir (dar baixa na atividade que o plano resolve). Depois de chamar, responda em UMA linha (o cartão já mostra os passos).',
+    input_schema: { type: 'object', properties: { titulo: { type: 'string', description: 'Ex.: "Responder Alex sobre a vistoria"' }, atividade_id: { type: 'string', description: 'id da atividade relacionada, se houver' },
+      passos: { type: 'array', items: { type: 'object', properties: { tipo: { type: 'string', enum: ['whatsapp', 'compromisso', 'lembrete', 'nota', 'concluir'] }, conversa: { type: 'string' }, mensagem: { type: 'string' }, titulo: { type: 'string' }, inicio: { type: 'string', description: 'compromisso: YYYY-MM-DDTHH:MM' }, fim: { type: 'string' }, local: { type: 'string' }, quando: { type: 'string', description: 'lembrete: YYYY-MM-DDTHH:MM' }, texto: { type: 'string', description: 'nota' }, atividade_id: { type: 'string', description: 'concluir' } }, required: ['tipo'] } } }, required: ['titulo', 'passos'] } },
   { name: 'anotar', description: 'Escreve no bloco "Notas importantes" do usuário (topo do painel): informação de referência que ele vai precisar consultar depois — endereço de obra, número de contrato/processo, valor combinado, código, horário fixo, decisão. Não use para tarefas (use criar_atividade) nem compromissos.',
     input_schema: { type: 'object', properties: { texto: { type: 'string', description: 'Uma frase curta e completa' } }, required: ['texto'] } },
   { name: 'ler_historico', description: 'Lê as últimas mensagens de uma conversa do WhatsApp no histórico completo (arquivo no Drive). Use para "o que o fulano falou", "como ficou aquilo com X", "me atualiza sobre a obra Y".',
@@ -444,6 +459,7 @@ async function runTool(name, i, chatId, srcId) {
       out.sort((a, b) => a.data.localeCompare(b.data));
       return out.slice(-40);
     }
+    case 'preparar_plano': { const p = createPlan(i, chatId); return p ? { ok: true, plano_id: p.id, status: 'aguardando_ok', aviso: 'Nada foi executado: o usuário aprova com ok.' } : { erro: 'plano sem passos válidos' }; }
     case 'anotar': return addNote(i.texto) ? { ok: true } : { ok: false, motivo: 'já estava anotado ou vazio' };
     case 'ler_historico': return DESK ? await window.wv1desk.logRead({ conversa: i.conversa || '', linhas: i.linhas }) : { erro: 'histórico só no app do computador' };
     case 'registrar_descricao': {
@@ -480,6 +496,7 @@ function systemPrompt() {
 Para perguntas sobre algo que ele mandou nas conversas (documentos, fotos, datas, nomes), use buscar_conversas antes de responder e cite de qual conversa veio. Para "me lembra de...", use criar_lembrete; se ele não disser a hora, use 08:00 do dia apropriado e avise.
 Perfil dele: ${db.settings.profile || '(não informado)'}
 Memória (pessoas, obras, clientes):\n${db.facts.slice(-60).map(f => '- ' + f).join('\n') || '(nada ainda)'}
+Para FAZER algo por ele (responder/cobrar/avisar alguém no WhatsApp, marcar, anotar, dar baixa), monte o plano com preparar_plano: o app mostra o cartão e ele aprova com "ok"; só então executa. Nunca diga que já mandou ou fez. ${db.plans.find(p => p.status === 'aguardando_ok') ? 'Há um plano aguardando o ok dele: "' + db.plans.find(p => p.status === 'aguardando_ok').titulo + '". Se ele pedir mudança, chame preparar_plano de novo (o novo substitui).' : ''}
 Bloco "Notas importantes" dele (use anotar para acrescentar o que ele vai precisar consultar):\n${db.notes.trim() || '(vazio)'}
 Você também lê o WhatsApp dele: buscar_conversas procura nas conversas do app e no histórico completo do WhatsApp guardado no Drive (todas as conversas lidas, sem limite de data, mais os resumos diários); ler_historico mostra as últimas mensagens de uma conversa. Antes de dizer que não sabe de uma pessoa, obra, valor ou combinado, procure. Seja proativa: se notar atraso, conflito de horário ou algo esquecido, diga e proponha a ação.
 Resumos recentes do WhatsApp dele (últimos dias, escritos por você):\n${recentSums || '(nenhum ainda)'}
@@ -798,6 +815,11 @@ document.addEventListener('click', async e => {
     case 'gcal-sync': el.textContent = 'Sincronizando…'; el.disabled = true; await gcalPull(); settingsSheet(); toast('Agenda sincronizada'); break;
     case 'mprev': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCal(); break;
     case 'mnext': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCal(); break;
+    case 'plan-ok': runPlan(id); break;
+    case 'plan-cancel': { const p = db.plans.find(x => x.id === id); if (p) { p.status = 'cancelado'; save(); render(); } break; }
+    case 'task-plan': planForTask(id); break;
+    case 'upd-go': updGo(); break;
+    case 'upd-later': if ($('#updBar')) $('#updBar').style.display = 'none'; break;
     case 'ptasks-toggle': db.meta.ptasksClosed = !db.meta.ptasksClosed; save(); renderPTasks(); break;
     case 'inbox-ok': acceptInbox(id); break;
     case 'inbox-no': db.inbox = db.inbox.filter(x => x.id !== id); save(); renderSide(); break;
@@ -909,6 +931,7 @@ async function sendSide() {
   const t = $('#sideInput').value.trim(); if (!t) return;
   $('#sideInput').value = '';
   pushMsg('claude', { from: 'me', text: t });
+  if (/^(ok|okay|pode|pode sim|manda|vai|faz|confirmo|aprovado|pode mandar|pode fazer|ok pode)\s*[.!]*$/i.test(t) && db.plans.some(p => p.status === 'aguardando_ok')) { runPlan(db.plans.find(p => p.status === 'aguardando_ok').id); return; }
   if (/ler todo o whatsapp/i.test(t)) sweepNow(); else if (/^📖|ler todas as conversas/i.test(t)) await readAll(true); else await askClaude(t);
 }
 function sweepNow() {
@@ -928,28 +951,57 @@ document.addEventListener('input', e => { if (e.target.id === 'search') { search
 window.addEventListener('popstate', () => { if (openChatId && !WIDE()) closeChat(); });
 $('#rbCal').addEventListener('click', () => { db.meta.nocal = !db.meta.nocal; save(); render(); });
 
-// ---------- atualização (app de computador) ----------
+// ---------- atualização (app de computador): baixa sozinha; instala quando você não está usando ----------
+let lastInputHost = Date.now(); ['mousedown', 'keydown'].forEach(ev => document.addEventListener(ev, () => { lastInputHost = Date.now(); }, true));
+const hostIdle = () => document.hidden || Date.now() - lastInputHost > 5 * 60e3;
+let updReady = null, updBusy = false; // { kind: 'ui' | 'desktop', version }
+function updBar(text, btn) {
+  let el = $('#updBar');
+  if (!el) { el = document.createElement('div'); el.id = 'updBar'; el.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:#111b21;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;z-index:9999;display:flex;gap:10px;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:90vw'; document.body.appendChild(el); }
+  el.innerHTML = `<span>${esc(text)}</span>${btn ? `<button class="btn pri" data-act="upd-go" style="padding:6px 10px">${esc(btn)}</button><button class="btn" data-act="upd-later" style="padding:6px 10px">Depois</button>` : ''}`;
+  el.style.display = '';
+}
+async function updGo() {
+  if (!updReady || updBusy) return; updBusy = true;
+  try {
+    if (updReady.kind === 'desktop') { updBar(`Instalando a versão ${updReady.version}… o app reabre sozinho.`); const r = await window.wv1desk.updateInstall(); if (r && r.error) { updBar('Não consegui instalar: ' + r.error, null); updReady = null; } }
+    else { updBar('Atualizando…'); const r = await window.wv1desk.applyUpdate(); if (r && r.error) { updBar('Falhou: ' + r.error, null); updReady = null; } }
+  } finally { updBusy = false; }
+}
 async function checkUpdate(silent) {
   if (!DESK) return;
   try {
     const u = await window.wv1desk.checkUpdate();
     $('#rbUpd').classList.toggle('has', !!u.available);
-    if (silent) return;
-    if (u.error) return toast('Não consegui verificar: ' + u.error);
-    if (!u.available) return toast(`Você já está na versão mais nova (${u.current})`);
-    sheet(`<h2>Atualização disponível</h2>
-      <div class="field">Versão ${esc(u.current)} → <b>${esc(u.latest)}</b>${u.notes ? `<div class="hint" style="font-size:14px;white-space:pre-wrap;margin-top:8px">${esc(u.notes)}</div>` : ''}
-      ${u.desktopNeeded ? '<div class="hint" style="color:#ea0038;margin-top:8px">Esta versão precisa do instalador novo: vou abrir a página de download.</div>' : '<div class="hint" style="margin-top:8px">Leva poucos segundos. Suas conversas, lembretes e o login do WhatsApp continuam.</div>'}</div>
-      <div class="btns"><button class="btn" data-act="close">Depois</button><button class="btn pri" data-act="apply-update">Atualizar agora</button></div>`);
+    if (u.error) { if (!silent) toast('Não consegui verificar: ' + u.error); return; }
+    if (!u.available) { if (!silent) toast(`Você já está na versão mais nova (${u.current})`); return; }
+    if (u.desktopNeeded) {
+      if (!silent) updBar(`Baixando a versão ${u.latest}…`);
+      const d = await window.wv1desk.updateDownload();
+      if (d.status !== 'ready') { if (!silent) updBar('Não consegui baixar: ' + (d.error || d.status), null); return; }
+      updReady = { kind: 'desktop', version: d.version };
+      if (silent && hostIdle()) return updGo();
+      updBar(`Versão ${d.version} baixada e pronta.`, 'Reiniciar para atualizar');
+    } else {
+      updReady = { kind: 'ui', version: u.latest };
+      if (silent && hostIdle()) return updGo();
+      updBar(`Versão ${u.latest} pronta (leva segundos; o WhatsApp recarrega).`, 'Atualizar agora');
+    }
   } catch (e) { if (!silent) toast('Não consegui verificar a atualização'); }
 }
 if (DESK) {
   $('#rbUpd').addEventListener('click', () => checkUpdate(false));
-  setTimeout(() => checkUpdate(true), 8000); setInterval(() => checkUpdate(true), 6 * 3600e3);
+  setTimeout(() => checkUpdate(true), 20000); setInterval(() => checkUpdate(true), 4 * 3600e3);
+  setInterval(() => { if (updReady && hostIdle()) updGo(); }, 60e3); // ficou pendente por estar em uso: instala assim que parar
+  if (window.wv1desk.onUpdateProgress) window.wv1desk.onUpdateProgress(d => {
+    const el = $('#updBar');
+    if (d.status === 'downloading' && el && el.style.display !== 'none') updBar(`Baixando a versão ${d.version}… ${d.pct || 0}%`);
+    if (d.status === 'error' && updReady) { updReady = null; updBar('Não consegui instalar a atualização: ' + d.error + '. Baixe o instalador no projeto.', null); }
+  });
 }
 
 // ---------- leitura automática do WhatsApp → lista "A fazer" ----------
-db.inbox = db.inbox || []; db.meta.waSeen = db.meta.waSeen || []; db.waLog = db.waLog || []; db.facts = db.facts || []; if (typeof db.notes !== 'string') db.notes = '';
+db.inbox = db.inbox || []; db.meta.waSeen = db.meta.waSeen || []; db.waLog = db.waLog || []; db.facts = db.facts || []; if (typeof db.notes !== 'string') db.notes = ''; db.plans = db.plans || [];
 if (db.settings.profile === undefined) db.settings.profile = 'Engenheiro civil em Joinville/SC. Trojan Engenharia (projetos, controle tecnológico de pavimentação, investigação geotécnica, supervisão de contratos públicos) e Grupo NEV (sócio da NEV Geotecnia; sócio: Alex Rafael Niepiçuy).';
 const waCtx = {}; db.waLog.slice(-600).forEach(m => { (waCtx[m.chat] = waCtx[m.chat] || []).push(m); });
 let waSweeping = false, waSweepFull = false, manualSweep = false, waWv = null;
@@ -1014,6 +1066,7 @@ function acceptInbox(id, quiet) {
     const remindAt = it.tipo === 'lembrete' || it.tipo === 'responder' || it.quando.length > 10 ? (it.quando.length > 10 ? it.quando : (it.quando ? it.quando + 'T08:00' : '')) : '';
     const t = addTask({ title: it.titulo, due: it.quando.slice(0, 10), remindAt, chatId: 'claude' });
     pushMsg('claude', { from: 'them', card: { type: 'task', id: t.id, remind: !!remindAt } });
+    if (it.tipo === 'responder' && !quiet && db.settings.apiKey) setTimeout(() => planForTask(t.id), 300); // já deixa a resposta pronta para o ok
   }
   save(); if (!quiet) render();
 }
@@ -1083,6 +1136,83 @@ Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '
     save();
   } catch (e) { console.warn('leitura do WhatsApp:', e.message); waQueue.unshift(...batch.slice(0, 30)); waTimer = setTimeout(flushWa, 120000); }
   finally { waBusy = false; render(); }
+}
+
+// ---------- planos de execução: a assistente monta, ele aprova com "ok", o app executa ----------
+const STEP_ICON = { whatsapp: '💬', compromisso: '📅', lembrete: '🔔', nota: '📝', concluir: '✅' };
+const PLAN_STATUS = { aguardando_ok: 'aguardando ok', executando: 'executando', feito: 'feito', erro: 'com erro', cancelado: 'cancelado' };
+function stepText(st) {
+  switch (st.tipo) {
+    case 'whatsapp': return `Enviar no WhatsApp para ${st.conversa}: “${st.mensagem}”`;
+    case 'compromisso': return `Marcar "${st.titulo}" ${st.inicio ? fmtDay(st.inicio) + ', ' + fmtHour(st.inicio) : ''}${st.local ? ' @ ' + st.local : ''}`;
+    case 'lembrete': return `Lembrete ${st.quando ? fmtDay(st.quando) + ', ' + fmtHour(st.quando) : ''}: ${st.titulo}`;
+    case 'nota': return `Anotar: ${st.texto}`;
+    case 'concluir': return `Dar baixa: ${(db.tasks.find(t => t.id === st.atividade_id) || {}).title || st.atividade_id || 'atividade'}`;
+    default: return JSON.stringify(st);
+  }
+}
+function createPlan(i, chatId) {
+  const passos = (i.passos || []).filter(st => st && st.tipo && (st.tipo !== 'whatsapp' || (st.conversa && st.mensagem)) && (st.tipo !== 'compromisso' || (st.titulo && st.inicio)) && (st.tipo !== 'lembrete' || (st.titulo && st.quando)) && (st.tipo !== 'nota' || st.texto)).map(st => ({ ...st, status: 'pendente', erro: '' }));
+  if (!passos.length) return null;
+  db.plans.forEach(p => { if (p.status === 'aguardando_ok') p.status = 'cancelado'; }); // o plano novo substitui o que estava esperando
+  const plan = { id: uid(), titulo: i.titulo || 'Plano', taskId: i.atividade_id || '', passos, status: 'aguardando_ok', criado: new Date().toISOString() };
+  db.plans.unshift(plan); if (db.plans.length > 100) db.plans.length = 100;
+  save(); pushMsg(chatId || 'claude', { from: 'them', card: { type: 'plan', id: plan.id } }); render();
+  return plan;
+}
+const waSendWaiters = {};
+function waSend(chat, text) {
+  return new Promise(resolve => {
+    if (!DESK || !waWv) return resolve({ ok: false, erro: 'o WhatsApp não está aberto dentro do app' });
+    const id = uid(); waSendWaiters[id] = resolve;
+    setTimeout(() => { if (waSendWaiters[id]) { delete waSendWaiters[id]; resolve({ ok: false, erro: 'o WhatsApp não respondeu (tempo esgotado)' }); } }, 45000);
+    try { waWv.send('wa-send', { id, chat, text }); } catch (e) { delete waSendWaiters[id]; resolve({ ok: false, erro: e.message }); }
+  });
+}
+async function runPlan(id) {
+  const p = db.plans.find(x => x.id === id); if (!p || p.status === 'executando') return;
+  p.status = 'executando'; save(); render();
+  let failed = null;
+  for (const st of p.passos) {
+    if (st.status === 'feito') continue;
+    try {
+      if (st.tipo === 'whatsapp') { const r = await waSend(st.conversa, st.mensagem); if (!r.ok) throw new Error(r.erro || 'falhou'); }
+      else if (st.tipo === 'compromisso') { const ev = addEvent({ title: st.titulo, start: st.inicio.slice(0, 16), end: (st.fim || '').slice(0, 16), location: st.local || '', notes: st.observacoes || '', chatId: 'claude' }); st.ref = ev.id; }
+      else if (st.tipo === 'lembrete') { const t = addTask({ title: st.titulo, remindAt: st.quando.slice(0, 16), chatId: 'claude' }); st.ref = t.id; }
+      else if (st.tipo === 'nota') addNote(st.texto);
+      else if (st.tipo === 'concluir') { const t = db.tasks.find(x => x.id === (st.atividade_id || p.taskId)); if (t) t.done = true; }
+      st.status = 'feito'; st.erro = '';
+    } catch (e) { st.status = 'erro'; st.erro = e.message; failed = st; break; }
+    save(); render();
+  }
+  p.status = failed ? 'erro' : 'feito'; p.fim = new Date().toISOString(); save(); render();
+  pushMsg('claude', { from: 'them', text: failed ? `⚠️ Parei em "${stepText(failed).slice(0, 80)}": ${failed.erro}. Ajuste e me diga "ok" de novo, ou faça por fora.` : `✅ Feito: ${p.titulo}.` });
+}
+async function planForTask(id) {
+  const t = db.tasks.find(x => x.id === id); if (!t) return;
+  if (!db.settings.apiKey) return toast('Preciso da chave da API para montar o plano');
+  const typing = pushMsg('claude', { from: 'them', text: 'montando o plano…', pending: true }); renderSide();
+  try {
+    await callClaude({ system: systemPrompt(), tools: TOOLS, postTo: 'claude', messages: [{ role: 'user', content: `[pedido do app, não é mensagem digitada por ele] Monte com preparar_plano o plano de execução da atividade [${t.id}] "${t.title}"${t.due ? ' (prazo ' + t.due + ')' : ''}. Se precisar de contexto, use ler_historico ou buscar_conversas antes. Se for responder, cobrar ou avisar alguém, escreva a mensagem pronta em primeira pessoa, no tom dele (direto, educado, sem floreio), com o nome da conversa exatamente como aparece no WhatsApp. Inclua o passo "concluir" (atividade_id ${t.id}) se o plano resolver a atividade. Depois responda em uma linha pedindo o ok.` }] });
+  } catch (e) { pushMsg('claude', { from: 'them', text: '⚠️ Não consegui montar o plano: ' + e.message }); }
+  finally { const c = db.chats.find(x => x.id === 'claude'); c.messages = c.messages.filter(m => m.id !== typing.id); save(); render(); }
+}
+// manual no Drive (Atividades.md): pendentes com seus planos, planos executados e concluídas
+let manualTimer = null, manualLast = '';
+function scheduleManual() { if (!window.wv1desk || !window.wv1desk.docWrite || db.settings.driveLog === false) return; clearTimeout(manualTimer); manualTimer = setTimeout(writeManual, 3000); }
+function writeManual() {
+  const fmt = d => new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const key = t => t.remindAt || (t.due ? t.due + 'T23:59' : '9999');
+  const stepLine = st => `${STEP_ICON[st.tipo] || '•'} ${stepText(st)}${st.status === 'feito' ? ' ✓' : st.status === 'erro' ? ' ⚠ ' + st.erro : ''}`;
+  const pend = db.tasks.filter(t => !t.done).sort((a, b) => key(a).localeCompare(key(b))).map(t => {
+    const p = db.plans.find(x => x.taskId === t.id && x.status !== 'cancelado' && x.status !== 'feito');
+    return `- [ ] ${t.title}${t.due ? ' — prazo ' + t.due : ''}${t.remindAt ? ' — lembrete ' + t.remindAt.replace('T', ' ') : ''}${p ? `\n  - plano (${PLAN_STATUS[p.status]}): ` + p.passos.map(stepLine).join(' | ') : ''}`;
+  });
+  const plans = db.plans.filter(p => p.status === 'feito' || p.status === 'erro').slice(0, 30).map(p => `- ${p.status === 'feito' ? '✅' : '⚠️'} ${fmt(p.fim || p.criado)} — ${p.titulo}: ` + p.passos.map(stepLine).join(' | '));
+  const done = db.tasks.filter(t => t.done).slice(-50).reverse().map(t => `- [x] ${t.title}`);
+  const body = `## Pendentes (${pend.length})\n${pend.join('\n') || '(nenhuma)'}\n\n## Planos executados\n${plans.join('\n') || '(nenhum)'}\n\n## Concluídas\n${done.join('\n') || '(nenhuma)'}\n`;
+  if (body === manualLast) return; manualLast = body;
+  window.wv1desk.docWrite({ name: 'Atividades', text: `# Atividades — manual de execução (WhatsApp v1)\nAtualizado: ${fmt(new Date())}\n\n` + body }).catch(() => {});
 }
 
 // ---------- Google Agenda (computador): OAuth do próprio usuário; compromissos vão e vêm da agenda principal ----------
@@ -1156,10 +1286,11 @@ if (DESK) {
   gcalRefreshStatus().then(() => { if (gcalOn()) gcalPull(); });
   setInterval(gcalPull, 10 * 60e3);
   setInterval(refreshSums, 10 * 60e3);
-  window.wv1desk.onSaved(d => { db.meta.savedCount = (db.meta.savedCount || 0) + 1; save(); toast('📁 Salvo: ' + d.rel); });
+  window.wv1desk.onSaved(d => { db.meta.savedCount = (db.meta.savedCount || 0) + 1; save(); toast(d.downloads ? `⬇️ Salvo em Downloads: ${d.name}${d.appFile ? '' : ' (cópia no Drive)'}` : '📁 Salvo: ' + d.rel); });
   waWv = wv;
   wv.addEventListener('ipc-message', e => {
     if (e.channel === 'wa-msgs') ingestWa(e.args[0]);
+    if (e.channel === 'wa-sent') { const r = e.args[0] || {}; const w = waSendWaiters[r.id]; if (w) { delete waSendWaiters[r.id]; w(r); } }
     if (e.channel === 'wa-sweep') {
       const st = e.args[0] || {}; waSweeping = st.state === 'start'; waSweepFull = !!st.full; renderSide();
       if (st.state === 'skip') { // WhatsApp em uso ou carregando: tenta de novo em ~2 min
@@ -1218,6 +1349,7 @@ function tick() {
   if (changed) { save(); render(); }
   scheduleSweeps();
 }
+
 function briefData(kind) {
   const today = ymd(new Date()), tm = new Date(); tm.setDate(tm.getDate() + 1); const tomorrow = ymd(tm);
   const day = kind === 'manha' ? today : tomorrow;

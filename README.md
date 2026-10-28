@@ -9,4 +9,5 @@ App pessoal de uso próprio: WhatsApp Web dentro de uma janela de Windows, com a
 Nenhuma chave de API ou conversa fica neste repositório: tudo fica só no PC.
 
 ## Instalador
+O ramo `installer` guarda só o instalador mais recente (`WhatsApp-v1-Instalador.exe`); `version.json` aponta para ele em `installerUrl` com o `sha256`. O app baixa e instala sozinho.
 O instalador do Windows (WhatsApp-v1-Instalador.zip) é entregue no projeto do Claude. Quando o botão ⟳ disser que precisa de instalador novo, peça lá a versão mais recente.
