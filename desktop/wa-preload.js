@@ -47,8 +47,35 @@ function scanUnreadPreviews() {
   return out;
 }
 
+// fotos da conversa aberta: salva a imagem exibida (vai para a pasta do Drive, por conversa)
+const mediaDone = new Set();
+let lastChat = '';
+async function scanMedia() {
+  const main = document.querySelector('#main');
+  if (!main) return;
+  const chat = chatName();
+  if (chat && chat !== lastChat) { lastChat = chat; ipcRenderer.send('wa-chat', chat); }
+  for (const row of main.querySelectorAll('div[data-id]')) {
+    const id = row.getAttribute('data-id');
+    if (!id || mediaDone.has(id)) continue;
+    const img = [...row.querySelectorAll('img[src^="blob:"]')].find(i => i.naturalWidth >= 240 || i.naturalHeight >= 240);
+    if (!img) continue;
+    mediaDone.add(id);
+    try {
+      const b = await (await fetch(img.src)).blob();
+      if (!/^image\/(jpeg|png)/.test(b.type)) continue; // figurinhas (webp) ficam de fora
+      const meta = (row.querySelector('[data-pre-plain-text]') || {}).getAttribute?.('data-pre-plain-text') || '';
+      const m = meta.match(/\[(\d{1,2}):(\d{2}),\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\]/);
+      const when = m ? new Date(+m[5], +m[4] - 1, +m[3], +m[1], +m[2]).toISOString() : null;
+      const ext = b.type === 'image/png' ? '.png' : '.jpg';
+      ipcRenderer.send('wa-media', { id, chat, when, name: 'foto' + ext, buf: new Uint8Array(await b.arrayBuffer()) });
+    } catch (e) { /* imagem ainda carregando: tenta na próxima */ mediaDone.delete(id); }
+  }
+}
+
 setInterval(() => {
   try {
+    scanMedia();
     const batches = scanUnreadPreviews();
     const open = scanOpenChat();
     if (open) batches.push(open);

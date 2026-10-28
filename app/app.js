@@ -352,6 +352,7 @@ async function sendImage(file) {
     const data = await shrink(file), id = 'img_' + uid(); await imgPut(id, data); imgCache[id] = data;
     const cap = $('#input').value.trim(); $('#input').value = ''; autosize();
     pushMsg(c.id, { from: 'me', text: cap, img: id });
+    if (DESK) window.wv1desk.saveFile({ chat: c.name, name: (file.name || 'foto').replace(/\.\w+$/, '') + '.jpg', dataUrl: data });
     if (c.watch) queueRead(c.id);
   } catch { toast('Não consegui abrir a foto'); }
 }
@@ -664,6 +665,10 @@ function settingsSheet() {
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sA" ${s.waAuto ? 'checked' : ''} style="width:auto"> Adicionar direto, sem pedir confirmação</label>
       <input id="sI" value="${esc(s.waIgnore || '')}" placeholder="Ignorar conversas (nomes separados por vírgula)" style="margin-top:6px">
       <div class="hint">Lê as mensagens novas da conversa aberta e as prévias das não lidas, em lotes. O texto vai para a Anthropic para análise (custo por uso da sua chave).</div></div>` : ''}
+    ${DESK ? `<div class="field"><label>📁 Pasta dos arquivos (Google Drive)</label>
+      <div style="font-size:14px;word-break:break-all">${esc(driveInfo?.base || '…')}</div>
+      <div class="hint">${driveInfo?.detected ? 'Google Drive encontrado: fotos das conversas que você abre e documentos que você baixa no WhatsApp vão para cá, separados por conversa, e o Drive sincroniza sozinho.' : '⚠️ Não achei o Google Drive no PC. Instale o "Google Drive para computador" (google.com/drive/download) e reabra o app, ou escolha a pasta. Enquanto isso salvo em Documentos.'}</div>
+      <div class="btns" style="justify-content:flex-start;padding:6px 0 0"><button class="btn" data-act="drive-pick">Escolher pasta</button><button class="btn" data-act="drive-open">Abrir pasta</button></div></div>` : ''}
     <div class="field"><label>Avisos no celular</label><button class="btn pri" data-act="notif" style="margin-top:6px">${'Notification' in window && Notification.permission === 'granted' ? '✓ Avisos ativados' : 'Ativar avisos'}</button>
       <div class="hint">O aviso aparece na hora do lembrete com o app aberto ou em segundo plano. Com o app totalmente fechado o celular pode atrasar; para garantia, mande o compromisso pro Google Agenda.</div></div>
     <div class="btns"><button class="btn" data-act="export">Backup (exportar)</button><button class="btn" data-act="import">Restaurar</button></div>
@@ -727,6 +732,8 @@ document.addEventListener('click', async e => {
   const id = d.id;
   switch (d.act) {
     case 'close': closeSheet(); break;
+    case 'drive-pick': { const d = await window.wv1desk.drivePick(); if (d) { db.settings.driveDir = d; save(); driveInfo = await window.wv1desk.driveSet(d); settingsSheet(); toast('Pasta definida'); } break; }
+    case 'drive-open': window.wv1desk.driveOpen(); break;
     case 'mprev': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCal(); break;
     case 'mnext': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCal(); break;
     case 'inbox-ok': acceptInbox(id); break;
@@ -932,6 +939,7 @@ async function flushWa() {
 }
 
 // ---------- computador: WhatsApp Web dentro do app ----------
+let driveInfo = null;
 const WA_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 function fromWaChat() {
   let c = db.chats.find(x => x.id === 'fromwa');
@@ -946,11 +954,13 @@ if (DESK) {
   wv.setAttribute('useragent', WA_UA);
   $('#waPane').appendChild(wv);
   window.wv1desk.onWaUnread(n => { waUnread = n; setBadge($('#waBadge'), n); });
+  window.wv1desk.driveSet(db.settings.driveDir || '').then(r => { driveInfo = r; });
+  window.wv1desk.onSaved(d => { db.meta.savedCount = (db.meta.savedCount || 0) + 1; save(); toast('📁 Salvo: ' + d.rel); });
   wv.addEventListener('ipc-message', e => { if (e.channel === 'wa-msgs') ingestWa(e.args[0]); });
   window.wv1desk.onToAssistant(async d => {
     const c = fromWaChat();
     let img;
-    if (d.img) { img = 'img_' + uid(); await imgPut(img, d.img); imgCache[img] = d.img; }
+    if (d.img) { img = 'img_' + uid(); await imgPut(img, d.img); imgCache[img] = d.img; window.wv1desk.saveFile({ chat: 'Enviados para a assistente', name: 'foto.png', dataUrl: d.img }); }
     pushMsg(c.id, { from: 'me', text: (d.text || '').trim(), img });
     if (!db.settings.apiKey && d.img && !d.text) toast('Foto guardada. Para a assistente ler fotos, configure a chave da API.');
     else toast('Enviado para a assistente ✓');

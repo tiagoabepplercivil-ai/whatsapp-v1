@@ -1,6 +1,7 @@
 // WhatsApp v1 — app de computador (Windows): WhatsApp Web real + assistente, agenda e lembretes ao lado.
 // Fecha para a bandeja para os lembretes continuarem tocando.
-const { app, BrowserWindow, Tray, Menu, shell, protocol, net, nativeImage, session, clipboard, ipcMain } = require('electron');
+const { app, BrowserWindow, Tray, Menu, shell, protocol, net, nativeImage, session, clipboard, ipcMain, dialog } = require('electron');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -8,6 +9,42 @@ const { pathToFileURL } = require('url');
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
 let win, tray, quitting = false, lastUnread = 0;
+
+// arquivos: tudo vai para <pasta do Drive>/WhatsApp v1/<conversa>/ — o Google Drive para computador sincroniza sozinho
+let driveDir = '', currentChat = '';
+const idsFile = () => path.join(app.getPath('userData'), 'arquivos-salvos.json');
+let savedIds = new Set(), idsTimer;
+function loadIds() { try { savedIds = new Set(JSON.parse(fs.readFileSync(idsFile(), 'utf8'))); } catch {} }
+function persistIds() { clearTimeout(idsTimer); idsTimer = setTimeout(() => { try { fs.writeFileSync(idsFile(), JSON.stringify([...savedIds].slice(-20000))); } catch {} }, 2000); }
+function detectDrive() {
+  const home = os.homedir();
+  const cands = [];
+  for (const L of 'GHIJKLMNOPQRSTUVWXYZDEF') cands.push(L + ':\\Meu Drive', L + ':\\My Drive');
+  cands.push(path.join(home, 'Google Drive', 'Meu Drive'), path.join(home, 'Google Drive', 'My Drive'), path.join(home, 'Google Drive'), path.join(home, 'My Drive'), path.join(home, 'Meu Drive'));
+  return cands.find(d => { try { return fs.statSync(d).isDirectory(); } catch { return false; } }) || '';
+}
+const baseDir = () => path.join(driveDir || path.join(app.getPath('documents')), 'WhatsApp v1');
+const clean = s => String(s || 'Sem nome').replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Sem nome';
+const stamp = d => { const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}${p(d.getMinutes())}`; };
+function targetPath(chat, name, when) {
+  const dir = path.join(baseDir(), clean(chat || currentChat || 'Outros'));
+  fs.mkdirSync(dir, { recursive: true });
+  const ext = path.extname(name), stem = clean(path.basename(name, ext));
+  let f = path.join(dir, `${stamp(when || new Date())} - ${stem}${ext}`), i = 2;
+  while (fs.existsSync(f)) f = path.join(dir, `${stamp(when || new Date())} - ${stem} (${i++})${ext}`);
+  return f;
+}
+function saved(f) { win && win.webContents.send('wv1:saved', { file: f, rel: path.relative(path.dirname(baseDir()), f) }); }
+function saveBuffer({ chat, name, buf, when, id }) {
+  if (id) { if (savedIds.has(id)) return; savedIds.add(id); persistIds(); }
+  try { const f = targetPath(chat, name, when ? new Date(when) : null); fs.writeFileSync(f, Buffer.from(buf)); saved(f); } catch (e) { console.warn('salvar arquivo:', e.message); }
+}
+ipcMain.handle('wv1:drive-set', (_, dir) => { driveDir = dir || detectDrive(); return { dir: driveDir, base: baseDir(), detected: !!driveDir }; });
+ipcMain.handle('wv1:drive-pick', async () => { const r = await dialog.showOpenDialog(win, { title: 'Escolha a pasta do Google Drive', properties: ['openDirectory'] }); return r.canceled ? '' : r.filePaths[0]; });
+ipcMain.handle('wv1:drive-open', () => { fs.mkdirSync(baseDir(), { recursive: true }); shell.openPath(baseDir()); });
+ipcMain.handle('wv1:save-file', (_, d) => { const m = /^data:([^;]+);base64,(.*)$/.exec(d.dataUrl || ''); if (m) saveBuffer({ chat: d.chat, name: d.name, buf: Buffer.from(m[2], 'base64') }); });
+ipcMain.on('wa-chat', (_, name) => { if (name) currentChat = name; });
+ipcMain.on('wa-media', (_, d) => saveBuffer(d));
 
 // atualização: a interface (pasta app/) é baixada do GitHub para a pasta do usuário, sem reinstalar
 const UPDATE_BASE = process.env.WV1_UPDATE_BASE || 'https://raw.githubusercontent.com/tiagoabepplercivil-ai/whatsapp-v1/main/';
@@ -88,6 +125,7 @@ app.on('web-contents-created', (_, wc) => {
 });
 
 app.whenReady().then(() => {
+  loadIds();
   protocol.handle('app', req => {
     const root = activeRoot();
     const p = path.normalize(path.join(root, decodeURIComponent(new URL(req.url).pathname)));
@@ -98,6 +136,12 @@ app.whenReady().then(() => {
   const ok = ['notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'mediaKeySystem'];
   waSes.setPermissionRequestHandler((_, perm, cb) => cb(ok.includes(perm)));
   waSes.setSpellCheckerLanguages(['pt-BR']);
+  // documentos e mídias que você baixar no WhatsApp vão direto para a pasta, sem perguntar onde salvar
+  waSes.on('will-download', (_, item) => {
+    const f = targetPath(currentChat, item.getFilename() || 'arquivo');
+    item.setSavePath(f);
+    item.once('done', (_, state) => { if (state === 'completed') saved(f); });
+  });
   createWindow();
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'app/icons/tray.png')));
   tray.setToolTip('WhatsApp');
