@@ -54,6 +54,7 @@ function fmtDay(s) {
   if (diff === 0) return 'Hoje'; if (diff === 1) return 'Amanhã'; if (diff === -1) return 'Ontem';
   return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
 }
+const evHour = ev => ev.allDay ? 'dia todo' : fmtHour(ev.start);
 function fmtWhen(ev) { return ev.allDay ? `${fmtDay(ev.start)}, dia todo` : `${fmtDay(ev.start)}, ${fmtHour(ev.start)}${ev.end ? '–' + fmtHour(ev.end) : ''}`; }
 function msgTime(iso) { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function listTime(iso) {
@@ -175,7 +176,7 @@ function cardTitle(card) {
 
 function eventRow(ev) {
   const n = db.tasks.filter(t => t.eventId === ev.id), done = n.filter(t => t.done).length;
-  return `<div class="ev" data-event="${ev.id}"><div class="hr">${fmtHour(ev.start)}</div><div class="body">
+  return `<div class="ev" data-event="${ev.id}"><div class="hr">${evHour(ev)}</div><div class="body">
     <div class="t">${esc(ev.title)}</div>
     <div class="s">${ev.end ? 'até ' + fmtHour(ev.end) : ''}${ev.location ? ' · 📍 ' + esc(ev.location) : ''}</div>
     ${n.length ? `<div class="s"><span class="chip">✅ ${done}/${n.length} atividades</span></div>` : ''}</div></div>`;
@@ -236,7 +237,7 @@ function renderCal() {
   if (tks.length) l += `<div class="section">Atividades com prazo</div>` + tks.map(taskRow).join('');
   // próximos
   const up = sortedEvents().filter(e => e.start.slice(0, 10) > calSel).slice(0, 5);
-  if (up.length) l += `<div class="section">Próximos</div>` + up.map(e => `<div class="ev" data-event="${e.id}"><div class="hr" style="font-size:12px">${parseLocal(e.start).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</div><div class="body"><div class="t">${esc(e.title)}</div><div class="s">${fmtHour(e.start)}</div></div></div>`).join('');
+  if (up.length) l += `<div class="section">Próximos</div>` + up.map(e => `<div class="ev" data-event="${e.id}"><div class="hr" style="font-size:12px">${parseLocal(e.start).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</div><div class="body"><div class="t">${esc(e.title)}</div><div class="s">${evHour(e)}</div></div></div>`).join('');
   $('#dayList').innerHTML = l;
 }
 function sideVisible() { return WIDE() ? !db.meta.nocal : $('#cal').classList.contains('open'); }
@@ -684,7 +685,7 @@ function eventDetail(id) {
 }
 function taskForm(t = {}) {
   const opts = sortedEvents().filter(e => e.start.slice(0, 10) >= ymd(new Date()) || e.id === t.eventId)
-    .map(e => `<option value="${e.id}" ${e.id === t.eventId ? 'selected' : ''}>${esc(fmtDay(e.start))} ${fmtHour(e.start)} · ${esc(e.title)}</option>`).join('');
+    .map(e => `<option value="${e.id}" ${e.id === t.eventId ? 'selected' : ''}>${esc(fmtDay(e.start))} ${evHour(e)} · ${esc(e.title)}</option>`).join('');
   sheet(`<h2>${t.id ? 'Editar atividade' : 'Nova atividade'}</h2>
     <div class="field"><label>Atividade</label><input id="tT" value="${esc(t.title)}"></div>
     <div class="field"><label>Prazo</label><input id="tD" type="date" value="${esc(t.due)}"></div>
@@ -1205,7 +1206,7 @@ function tick() {
   }
   const soon = localISO(new Date(Date.now() + 30 * 60e3));
   for (const ev of db.events) {
-    if (!ev.notified && ev.start <= soon && ev.start >= now.slice(0, 10)) {
+    if (!ev.notified && !ev.allDay && ev.start <= soon && ev.start >= now.slice(0, 10)) {
       ev.notified = true; changed = true;
       if (ev.start >= localISO(new Date(Date.now() - 15 * 60e3))) { pushMsg('claude', { from: 'them', text: `📅 Daqui a pouco (${fmtHour(ev.start)}): ${ev.title}${ev.location ? ' — ' + ev.location : ''}` }); notify('📅 ' + ev.title, `${fmtHour(ev.start)}${ev.location ? ' · ' + ev.location : ''}`); }
     }
@@ -1225,7 +1226,7 @@ function briefData(kind) {
   const late = db.tasks.filter(t => !t.done && ((t.remindAt && t.remindAt < localISO(new Date())) || (!t.remindAt && t.due && t.due < today)));
   const pend = db.tasks.filter(t => !t.done);
   const lines = [kind === 'manha' ? `☀️ Bom dia${db.settings.myName ? ', ' + db.settings.myName : ''}! Seu dia:` : `🌙 Fechando o dia. Amanhã:`];
-  lines.push(evs.length ? evs.map(e => `📅 ${fmtHour(e.start)} ${e.title}${e.location ? ' — ' + e.location : ''}`).join('\n') : (kind === 'manha' ? '📅 Nenhum compromisso hoje.' : '📅 Nenhum compromisso amanhã.'));
+  lines.push(evs.length ? evs.map(e => `📅 ${evHour(e)} ${e.title}${e.location ? ' — ' + e.location : ''}`).join('\n') : (kind === 'manha' ? '📅 Nenhum compromisso hoje.' : '📅 Nenhum compromisso amanhã.'));
   if (rem.length) lines.push(rem.map(t => `🔔 ${fmtHour(t.remindAt)} ${t.title}`).join('\n'));
   if (late.length) lines.push(`⚠️ Atrasados: ${late.slice(0, 8).map(t => t.title).join('; ')}`);
   if (db.inbox.length) lines.push(`📋 ${db.inbox.length} sugestão(ões) do WhatsApp esperando sua confirmação${db.inbox.some(x => x.prioridade === 'alta') ? ', com urgência' : ''}.`);
