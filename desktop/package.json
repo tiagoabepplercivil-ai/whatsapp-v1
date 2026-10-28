@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-v1",
   "productName": "WhatsApp v1",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "WhatsApp v1 - chat pessoal com agenda, lembretes e assistente",
   "author": "Tiago Beppler",
   "main": "main.js",

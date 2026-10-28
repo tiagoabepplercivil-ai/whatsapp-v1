@@ -5,6 +5,8 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
+const http = require('http');
+const crypto = require('crypto');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
@@ -105,6 +107,65 @@ ipcMain.handle('wv1:log-read', (_, { conversa, linhas }) => {
     const ls = fs.readFileSync(path.join(logDir(), f), 'utf8').split('\n').filter(Boolean);
     return { conversa: f.slice(0, -3), linhas: ls.slice(-(linhas || 60)) };
   } catch { return { erro: 'ainda não há histórico gravado' }; }
+});
+
+// Google Agenda: OAuth "app para computador" criado pelo próprio usuário (ID e segredo colados em Configurações).
+// Autoriza no navegador, recebe o código numa porta local e guarda o refresh token em userData/google.json.
+const gFile = () => path.join(app.getPath('userData'), 'google.json');
+let gTok = null;
+function gLoad() { try { gTok = JSON.parse(fs.readFileSync(gFile(), 'utf8')); } catch { gTok = null; } }
+function gSave() { try { fs.writeFileSync(gFile(), JSON.stringify(gTok)); } catch {} }
+function gForget() { gTok = null; try { fs.unlinkSync(gFile()); } catch {} }
+const G_SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly email';
+const form = o => new URLSearchParams(o).toString();
+ipcMain.handle('wv1:gcal-status', () => { if (!gTok) gLoad(); return { connected: !!(gTok && gTok.refresh_token), email: (gTok && gTok.email) || '' }; });
+ipcMain.handle('wv1:gcal-disconnect', () => { gForget(); return { ok: true }; });
+ipcMain.handle('wv1:gcal-connect', (_, { clientId, clientSecret }) => new Promise(resolve => {
+  if (!clientId || !clientSecret) return resolve({ error: 'cole o ID e o segredo do cliente' });
+  const verifier = crypto.randomBytes(32).toString('base64url'), challenge = crypto.createHash('sha256').update(verifier).digest('base64url'), state = crypto.randomBytes(8).toString('hex');
+  let done = false; const finish = r => { if (!done) { done = true; resolve(r); try { srv.close(); } catch {} } };
+  const page = (res, m) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(`<html><body style="font-family:sans-serif;padding:40px"><h2>${m}</h2>Pode fechar esta aba e voltar ao WhatsApp v1.</body></html>`); };
+  const srv = http.createServer(async (req, res) => {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    if (u.pathname !== '/') { res.writeHead(404); return res.end(); }
+    const code = u.searchParams.get('code'), err = u.searchParams.get('error');
+    if (err || !code || u.searchParams.get('state') !== state) { page(res, 'Não conectou: ' + (err || 'resposta inválida')); return finish({ error: err || 'resposta inválida' }); }
+    try {
+      const redirect = `http://127.0.0.1:${srv.address().port}`;
+      const r = await net.fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirect, grant_type: 'authorization_code', code_verifier: verifier }) });
+      const t = await r.json();
+      if (!r.ok || !t.refresh_token) throw new Error(t.error_description || t.error || 'o Google não devolveu o acesso permanente; em myaccount.google.com/permissions remova o app e tente de novo');
+      gTok = { clientId, clientSecret, refresh_token: t.refresh_token, access_token: t.access_token, exp: Date.now() + ((t.expires_in || 3600) - 60) * 1000, email: '' };
+      try { const me = await (await net.fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { authorization: 'Bearer ' + t.access_token } })).json(); gTok.email = me.email || ''; } catch {}
+      gSave(); page(res, 'Google Agenda conectada ✓'); finish({ ok: true, email: gTok.email });
+    } catch (e) { page(res, 'Não conectou: ' + e.message); finish({ error: e.message }); }
+    show();
+  });
+  srv.listen(0, '127.0.0.1', () => {
+    const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + form({ client_id: clientId, redirect_uri: `http://127.0.0.1:${srv.address().port}`, response_type: 'code', scope: G_SCOPES, access_type: 'offline', prompt: 'consent', code_challenge: challenge, code_challenge_method: 'S256', state });
+    shell.openExternal(url);
+  });
+  setTimeout(() => finish({ error: 'tempo esgotado (5 min)' }), 5 * 60e3);
+}));
+async function gToken() {
+  if (!gTok) gLoad();
+  if (!gTok || !gTok.refresh_token) throw new Error('Google Agenda não conectada');
+  if (gTok.access_token && gTok.exp > Date.now()) return gTok.access_token;
+  const r = await net.fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form({ client_id: gTok.clientId, client_secret: gTok.clientSecret, refresh_token: gTok.refresh_token, grant_type: 'refresh_token' }) });
+  const t = await r.json();
+  if (!r.ok) { if (t.error === 'invalid_grant') gForget(); throw new Error(t.error_description || t.error || 'falha ao renovar o acesso'); }
+  gTok.access_token = t.access_token; gTok.exp = Date.now() + ((t.expires_in || 3600) - 60) * 1000; gSave();
+  return gTok.access_token;
+}
+ipcMain.handle('wv1:gcal', async (_, { method, path: p, query, body }) => {
+  try {
+    const tok = await gToken();
+    const r = await net.fetch('https://www.googleapis.com/calendar/v3' + p + (query ? '?' + form(query) : ''), { method: method || 'GET', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    if (r.status === 204) return { ok: true };
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return { error: (d.error && d.error.message) || ('HTTP ' + r.status), status: r.status };
+    return d;
+  } catch (e) { return { error: e.message }; }
 });
 
 // atualização: a interface (pasta app/) é baixada do GitHub para a pasta do usuário, sem reinstalar

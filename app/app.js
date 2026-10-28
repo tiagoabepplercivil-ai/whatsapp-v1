@@ -54,7 +54,7 @@ function fmtDay(s) {
   if (diff === 0) return 'Hoje'; if (diff === 1) return 'Amanhã'; if (diff === -1) return 'Ontem';
   return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
 }
-function fmtWhen(ev) { return `${fmtDay(ev.start)}, ${fmtHour(ev.start)}${ev.end ? '–' + fmtHour(ev.end) : ''}`; }
+function fmtWhen(ev) { return ev.allDay ? `${fmtDay(ev.start)}, dia todo` : `${fmtDay(ev.start)}, ${fmtHour(ev.start)}${ev.end ? '–' + fmtHour(ev.end) : ''}`; }
 function msgTime(iso) { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function listTime(iso) {
   const d = new Date(iso), t = new Date();
@@ -113,13 +113,13 @@ function addEvent({ title, start, end, location, notes, chatId, tasks }) {
   const ev = { id: uid(), title: title || 'Compromisso', start, end: end || '', location: location || '', notes: notes || '', chatId: chatId || null, created: new Date().toISOString() };
   db.events.push(ev);
   (tasks || []).forEach(t => addTask({ title: t, eventId: ev.id, chatId }));
-  save(); return ev;
+  save(); gcalPush(ev); return ev;
 }
 function addTask({ title, due, eventId, chatId, remindAt }) {
   const t = { id: uid(), title: title || 'Atividade', due: due || (remindAt ? remindAt.slice(0, 10) : ''), remindAt: remindAt || '', eventId: eventId || null, chatId: chatId || null, done: false, created: new Date().toISOString() };
   db.tasks.push(t); save(); return t;
 }
-function delEvent(id) { db.events = db.events.filter(e => e.id !== id); db.tasks.forEach(t => { if (t.eventId === id) t.eventId = null; }); save(); }
+function delEvent(id) { const gid = (db.events.find(e => e.id === id) || {}).gid; db.events = db.events.filter(e => e.id !== id); db.tasks.forEach(t => { if (t.eventId === id) t.eventId = null; }); save(); gcalDelete(gid); }
 function sortedEvents() { return [...db.events].sort((a, b) => a.start.localeCompare(b.start)); }
 
 // ---------- render: lista principal ----------
@@ -271,7 +271,7 @@ function cardHtml(card) {
     return `<div class="card"><div class="ch">📅 Compromisso marcado</div><div class="cb">
       <div class="ct">${esc(ev.title)}</div><div class="cs">${esc(fmtWhen(ev))}${ev.location ? ' · 📍 ' + esc(ev.location) : ''}</div>
       ${n.length ? `<div class="cs">${n.map(t => (t.done ? '☑ ' : '☐ ') + esc(t.title)).join('<br>')}</div>` : ''}</div>
-      <div class="acts"><button data-gcal="${ev.id}">Google Agenda</button><button data-ics="${ev.id}">.ics</button><button data-event="${ev.id}">Abrir</button></div></div>`;
+      <div class="acts">${gcalOn() ? '' : `<button data-gcal="${ev.id}">Google Agenda</button>`}<button data-ics="${ev.id}">.ics</button><button data-event="${ev.id}">Abrir</button></div></div>`;
   }
   const t = db.tasks.find(x => x.id === card.id);
   if (!t) return `<div class="card"><div class="cb cs">Atividade removida</div></div>`;
@@ -300,6 +300,16 @@ function msgsHtml(c, menus) {
   }
   return h;
 }
+// bloco "Atividades" do painel: pendentes por data, com o quadradinho para dar baixa
+function renderPTasks() {
+  const box = $('#ptasks'); if (!box) return;
+  const key = t => t.remindAt || (t.due ? t.due + 'T23:59' : '9999');
+  const pend = db.tasks.filter(t => !t.done).sort((a, b) => key(a).localeCompare(key(b)));
+  const closed = !!db.meta.ptasksClosed, show = pend.slice(0, 8);
+  box.classList.toggle('closed', closed);
+  box.innerHTML = `<div class="todo-h"><b>☑️ Atividades · ${pend.length}</b><span><button data-view="tasks">ver tudo</button><button data-act="ptasks-toggle" title="Recolher/abrir">${closed ? '▸' : '▾'}</button></span></div>`
+    + (pend.length ? show.map(taskRow).join('') + (pend.length > show.length ? `<button class="more" data-view="tasks">+ ${pend.length - show.length} na aba Atividades</button>` : '') : '<div class="todo-h"><span>Nenhuma atividade pendente.</span></div>');
+}
 function renderSide() {
   const box = $('#sideMsgs'); if (!box) return;
   const c = db.chats.find(x => x.id === 'claude');
@@ -323,7 +333,7 @@ function renderSide() {
   } else {
     h += `<div class="todo-h"><span>${DESK && db.settings.waRead !== false ? '👁 Lendo seu WhatsApp. Nada novo a fazer.' : 'Nada novo a fazer.'}</span>${pend ? `<button data-view="tasks">${pend} pendente(s)</button>` : ''}</div>`;
   }
-  $('#todo').innerHTML = h;
+  $('#todo').innerHTML = h; renderPTasks();
   $('#sideStatus').textContent = waSweeping ? (waSweepFull ? 'lendo todas as conversas…' : 'abrindo as conversas não lidas…') : reading || waBusy ? 'lendo mensagens…' : (DESK && db.settings.waRead !== false ? 'lendo seu WhatsApp' : 'online');
 }
 function pushMsg(chatId, msg) {
@@ -448,7 +458,7 @@ async function runTool(name, i, chatId, srcId) {
     case 'atualizar_compromisso': {
       const e = db.events.find(x => x.id === i.id); if (!e) return { erro: 'não encontrado' };
       if (i.titulo) e.title = i.titulo; if (i.inicio) e.start = i.inicio.slice(0, 16); if (i.fim !== undefined) e.end = (i.fim || '').slice(0, 16);
-      if (i.local !== undefined) e.location = i.local; if (i.observacoes !== undefined) e.notes = i.observacoes; save();
+      if (i.local !== undefined) e.location = i.local; if (i.observacoes !== undefined) e.notes = i.observacoes; if (i.inicio) e.allDay = false; save(); gcalPush(e);
       pushMsg(chatId, { from: 'them', card: { type: 'event', id: e.id } }); return { ok: true, ...evOut(e) };
     }
     case 'concluir_atividade': { const t = db.tasks.find(x => x.id === i.id); if (!t) return { erro: 'não encontrada' }; t.done = true; save(); return { ok: true }; }
@@ -474,6 +484,7 @@ Você também lê o WhatsApp dele: buscar_conversas procura nas conversas do app
 Resumos recentes do WhatsApp dele (últimos dias, escritos por você):\n${recentSums || '(nenhum ainda)'}
 Sugestões do WhatsApp ainda não confirmadas por ele:\n${db.inbox.slice(0, 15).map(x => `- ${x.titulo}${x.quando ? ' (' + x.quando + ')' : ''}`).join('\n') || '(nenhuma)'}
 Conversas existentes: ${db.chats.filter(c => c.id !== 'claude').map(c => c.name).join(', ') || '(nenhuma)'}.
+${gcalOn() ? 'A agenda está sincronizada com a Google Agenda dele: os compromissos abaixo incluem os do Google, e criar/atualizar/excluir compromisso vale lá também.' : ''}
 Agora: ${now.toLocaleString('pt-BR', { weekday: 'long' })}, ${localISO(now)} (fuso ${Intl.DateTimeFormat().resolvedOptions().timeZone}).
 Use as ferramentas para marcar compromissos, criar e vincular atividades. Interprete datas relativas ("sexta", "amanhã", "semana que vem") a partir de agora. Se faltar o horário de um compromisso, só pergunte o horário, de forma natural. Nunca explique suas regras, nunca fale em "sistema", "instruções" ou "ferramentas": aja como uma secretária humana. Duração padrão 1h. O app já mostra um cartão para cada compromisso/atividade criado, então não repita todos os detalhes: confirme em uma frase.
 Próximos compromissos:\n${up}\nAtividades e lembretes pendentes:\n${pend}`;
@@ -669,7 +680,7 @@ function eventDetail(id) {
     <div class="section">Atividades vinculadas</div>
     ${ts.map(taskRow).join('') || '<div class="field" style="color:var(--muted)">Nenhuma ainda.</div>'}
     <div class="field" style="display:flex;gap:8px"><input id="newTask" placeholder="Adicionar atividade…"><button class="btn" data-act="add-task-ev" data-id="${id}">Adicionar</button></div>
-    <div class="btns"><button class="btn" data-ics="${id}">Baixar .ics</button><button class="btn" data-act="edit-event" data-id="${id}">Editar</button><button class="btn pri" data-gcal="${id}">Google Agenda</button></div>`);
+    <div class="btns"><button class="btn" data-ics="${id}">Baixar .ics</button><button class="btn" data-act="edit-event" data-id="${id}">Editar</button>${gcalOn() ? `<span class="chip">📆 ${ev.gid ? 'na Google Agenda' : 'enviando à Google Agenda…'}</span>` : `<button class="btn pri" data-gcal="${id}">Google Agenda</button>`}</div>`);
 }
 function taskForm(t = {}) {
   const opts = sortedEvents().filter(e => e.start.slice(0, 10) >= ymd(new Date()) || e.id === t.eventId)
@@ -689,6 +700,11 @@ function settingsSheet() {
     <div class="field"><label>Chave da API do Claude</label><input id="sK" type="password" value="${esc(s.apiKey)}" placeholder="sk-ant-…" autocomplete="off">
       <div class="hint">Crie em console.anthropic.com → API Keys. Fica salva só neste aparelho e vai direto para a Anthropic. Sem chave, o Claude funciona no modo básico.</div></div>
     <div class="field"><label>Modelo</label><input id="sM" value="${esc(s.model)}"></div>
+    ${DESK ? `<div class="field"><label>Google Agenda</label>
+      ${gcal.connected ? `<div style="font-size:14px">✅ Conectada${gcal.email ? ' como ' + esc(gcal.email) : ''}. Compromissos vão e vêm da sua agenda principal (a cada 10 min).</div><div class="btns" style="margin-top:8px"><button class="btn" data-act="gcal-sync">Sincronizar agora</button><button class="btn" data-act="gcal-disconnect">Desconectar</button></div>`
+      : `<input id="gI" value="${esc(s.gcalId || '')}" placeholder="ID do cliente (termina com .apps.googleusercontent.com)"><input id="gS" value="${esc(s.gcalSecret || '')}" placeholder="Segredo do cliente (GOCSPX-…)" style="margin-top:6px"><div class="btns" style="margin-top:8px"><button class="btn pri" data-act="gcal-connect">Conectar Google Agenda</button></div>
+      <div class="hint">Cadastro único na sua conta Google: console.cloud.google.com → novo projeto → "APIs e serviços" → ativar "Google Calendar API" → "Tela de permissão OAuth" (Externo; em "Usuários de teste" adicione seu e-mail) → "Credenciais" → "Criar credenciais" → "ID do cliente OAuth" → tipo "App para computador". Cole aqui o ID e o segredo e clique em Conectar: abre o Google no navegador para você autorizar.</div>`}
+    </div>` : ''}
     ${DESK ? `<div class="field"><label>WhatsApp</label>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400"><input type="checkbox" id="sW" ${s.waRead !== false ? 'checked' : ''} style="width:auto"> Assistente lê minhas mensagens e lista o que fazer</label>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sA" ${s.waAuto ? 'checked' : ''} style="width:auto"> Adicionar direto, sem pedir confirmação</label>
@@ -767,8 +783,21 @@ document.addEventListener('click', async e => {
     case 'close': closeSheet(); break;
     case 'drive-pick': { const d = await window.wv1desk.drivePick(); if (d) { db.settings.driveDir = d; save(); driveInfo = await window.wv1desk.driveSet(d); settingsSheet(); toast('Pasta definida'); } break; }
     case 'drive-open': window.wv1desk.driveOpen(); break;
+    case 'gcal-connect': {
+      const clientId = $('#gI').value.trim(), clientSecret = $('#gS').value.trim();
+      if (!clientId || !clientSecret) return toast('Cole o ID e o segredo do cliente');
+      db.settings.gcalId = clientId; db.settings.gcalSecret = clientSecret; save();
+      el.textContent = 'Autorize no navegador…'; el.disabled = true;
+      const r = await window.wv1desk.gcalConnect({ clientId, clientSecret });
+      await gcalRefreshStatus(); settingsSheet();
+      if (r && r.ok) { toast('Google Agenda conectada ✓'); gcalPull(); } else toast('Não conectou: ' + (r && r.error || 'tente de novo'));
+      break;
+    }
+    case 'gcal-disconnect': await window.wv1desk.gcalDisconnect(); await gcalRefreshStatus(); settingsSheet(); toast('Google Agenda desconectada'); break;
+    case 'gcal-sync': el.textContent = 'Sincronizando…'; el.disabled = true; await gcalPull(); settingsSheet(); toast('Agenda sincronizada'); break;
     case 'mprev': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1); renderCal(); break;
     case 'mnext': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); renderCal(); break;
+    case 'ptasks-toggle': db.meta.ptasksClosed = !db.meta.ptasksClosed; save(); renderPTasks(); break;
     case 'inbox-ok': acceptInbox(id); break;
     case 'inbox-no': db.inbox = db.inbox.filter(x => x.id !== id); save(); renderSide(); break;
     case 'inbox-all': [...db.inbox].forEach(x => acceptInbox(x.id, true)); render(); break;
@@ -780,7 +809,7 @@ document.addEventListener('click', async e => {
       const title = $('#fT').value.trim(), start = $('#fS').value, end = $('#fE').value;
       if (!start) return toast('Informe o início');
       if (end && end < start) return toast('O fim é antes do início');
-      if (id) { Object.assign(db.events.find(x => x.id === id), { title: title || 'Compromisso', start, end, location: $('#fL').value.trim(), notes: $('#fN').value.trim() }); save(); }
+      if (id) { const ev = db.events.find(x => x.id === id); Object.assign(ev, { title: title || 'Compromisso', start, end, location: $('#fL').value.trim(), notes: $('#fN').value.trim(), allDay: false }); save(); gcalPush(ev); }
       else {
         const ev = addEvent({ title, start, end, location: $('#fL').value.trim(), notes: $('#fN').value.trim(), chatId: openChatId, tasks: $('#fA').value.split('\n').map(s => s.trim()).filter(Boolean) });
         if (openChatId) pushMsg(openChatId, { from: 'me', card: { type: 'event', id: ev.id } });
@@ -802,6 +831,7 @@ document.addEventListener('click', async e => {
     case 'del-task': db.tasks = db.tasks.filter(x => x.id !== id); save(); closeSheet(); render(); if (openChatId) renderMsgs(); break;
     case 'save-settings':
       if ($('#sW')) { db.settings.waRead = $('#sW').checked; db.settings.waAuto = $('#sA').checked; db.settings.waSweep = $('#sS').checked; db.settings.driveLog = $('#sL').checked; db.settings.waIgnore = $('#sI').value.trim(); db.settings.profile = $('#sP').value.trim(); db.facts = $('#sF').value.split('\n').map(x => x.trim()).filter(Boolean); }
+      if ($('#gI')) { db.settings.gcalId = $('#gI').value.trim(); db.settings.gcalSecret = $('#gS').value.trim(); }
       db.settings.myName = $('#sN').value.trim(); db.settings.apiKey = $('#sK').value.trim(); db.settings.model = $('#sM').value.trim() || 'claude-sonnet-5-5';
       save(); closeSheet(); render(); if (openChatId) openChat(openChatId); toast('Salvo'); break;
     case 'export': {
@@ -1054,6 +1084,57 @@ Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '
   finally { waBusy = false; render(); }
 }
 
+// ---------- Google Agenda (computador): OAuth do próprio usuário; compromissos vão e vêm da agenda principal ----------
+let gcal = { connected: false, email: '' }, gcalPulling = false;
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const gcalOn = () => DESK && !!gcal.connected;
+async function gcalRefreshStatus() { if (!DESK || !window.wv1desk.gcalStatus) return; try { gcal = await window.wv1desk.gcalStatus(); } catch {} }
+function gBody(ev) {
+  if (ev.allDay) { const d = ev.start.slice(0, 10); return { summary: ev.title, location: ev.location || '', description: ev.notes || '', start: { date: d }, end: { date: ymd(new Date(parseLocal(d).getTime() + 864e5)) } }; }
+  const start = ev.start.length > 10 ? ev.start : ev.start + 'T08:00';
+  const end = ev.end && ev.end.length > 10 && ev.end > start ? ev.end : localISO(new Date(parseLocal(start).getTime() + 3600e3));
+  return { summary: ev.title, location: ev.location || '', description: ev.notes || '', start: { dateTime: start + ':00', timeZone: TZ }, end: { dateTime: end + ':00', timeZone: TZ } };
+}
+async function gcalPush(ev) {
+  if (!gcalOn() || !ev) return;
+  try {
+    const r = ev.gid ? await window.wv1desk.gcal({ method: 'PATCH', path: '/calendars/primary/events/' + encodeURIComponent(ev.gid), body: gBody(ev) })
+                     : await window.wv1desk.gcal({ method: 'POST', path: '/calendars/primary/events', body: gBody(ev) });
+    if (r && r.error) { if (r.status === 404 && ev.gid) { ev.gid = ''; return gcalPush(ev); } throw new Error(r.error); }
+    ev.gid = r.id; ev.getag = r.updated || ''; ev.gdirty = false; save();
+  } catch (e) { ev.gdirty = true; save(); toast('Google Agenda: ' + e.message); }
+}
+async function gcalDelete(gid) { if (!gcalOn() || !gid) return; try { await window.wv1desk.gcal({ method: 'DELETE', path: '/calendars/primary/events/' + encodeURIComponent(gid) }); } catch {} }
+function gToLocal(it) {
+  const allDay = !!(it.start && it.start.date);
+  return { title: it.summary || '(sem título)', start: allDay ? it.start.date + 'T00:00' : (it.start.dateTime || '').slice(0, 16), end: allDay ? '' : ((it.end && it.end.dateTime) || '').slice(0, 16), location: it.location || '', notes: it.description || '', allDay, getag: it.updated || '' };
+}
+async function gcalPull() { // traz 7 dias para trás e 90 para a frente; o que foi apagado lá some aqui; o que é só daqui sobe
+  if (!gcalOn() || gcalPulling) return; gcalPulling = true;
+  try {
+    const from = new Date(Date.now() - 7 * 864e5), to = new Date(Date.now() + 90 * 864e5);
+    const r = await window.wv1desk.gcal({ path: '/calendars/primary/events', query: { timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250', timeZone: TZ } });
+    if (!r || r.error) throw new Error((r && r.error) || 'sem resposta');
+    const seen = new Set(); let changed = false;
+    for (const it of r.items || []) {
+      if (it.status === 'cancelled' || !it.start) continue;
+      seen.add(it.id);
+      const loc = gToLocal(it);
+      let ev = db.events.find(e => e.gid === it.id);
+      if (!ev) { ev = db.events.find(e => !e.gid && e.title === loc.title && e.start === loc.start); if (ev) { ev.gid = it.id; changed = true; } } // já existia aqui: só liga
+      if (ev) { if (ev.getag !== loc.getag && !ev.gdirty) { Object.assign(ev, loc); changed = true; } }
+      else { db.events.push({ id: uid(), gid: it.id, ...loc, chatId: null, source: 'google', created: new Date().toISOString() }); changed = true; }
+    }
+    const fromS = localISO(from), toS = localISO(to);
+    const gone = db.events.filter(e => e.gid && !seen.has(e.gid) && e.start >= fromS && e.start <= toS);
+    if (gone.length) { const ids = new Set(gone.map(e => e.id)); db.events = db.events.filter(e => !ids.has(e.id)); db.tasks.forEach(t => { if (ids.has(t.eventId)) t.eventId = null; }); changed = true; }
+    for (const e of db.events.filter(e => (!e.gid || e.gdirty) && e.start >= ymd(new Date()))) await gcalPush(e);
+    db.meta.gcalSync = new Date().toISOString();
+    if (changed) { save(); render(); } else save();
+  } catch (e) { console.warn('Google Agenda:', e.message); }
+  finally { gcalPulling = false; }
+}
+
 // ---------- computador: WhatsApp Web dentro do app ----------
 let driveInfo = null;
 const WA_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -1071,6 +1152,8 @@ if (DESK) {
   $('#waPane').appendChild(wv);
   window.wv1desk.onWaUnread(n => { waUnread = n; setBadge($('#waBadge'), n); });
   window.wv1desk.driveSet(db.settings.driveDir || '').then(r => { driveInfo = r; refreshSums(); });
+  gcalRefreshStatus().then(() => { if (gcalOn()) gcalPull(); });
+  setInterval(gcalPull, 10 * 60e3);
   setInterval(refreshSums, 10 * 60e3);
   window.wv1desk.onSaved(d => { db.meta.savedCount = (db.meta.savedCount || 0) + 1; save(); toast('📁 Salvo: ' + d.rel); });
   waWv = wv;

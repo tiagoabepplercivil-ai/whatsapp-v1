@@ -24,6 +24,18 @@ Para atualizar depois: arraste a pasta nova no mesmo lugar.
 - No app: ⋮ → Configurações → cole a chave da API (console.anthropic.com → API Keys). Uso cobrado por token na sua conta Anthropic.
 - Sem chave, o Claude funciona em "modo básico": entende "reunião com Alex amanhã 14h", "vistoria sexta 9h30", "tarefa: enviar laudo dia 05/11".
 
+## Google Agenda (computador) — cadastro único, uns 8 cliques
+O Google só deixa um programa mexer na sua agenda se ele estiver cadastrado na sua conta. É de graça e você faz uma vez:
+1. Abra https://console.cloud.google.com e entre com a conta Google da sua agenda.
+2. No topo, "Selecionar projeto" → "Novo projeto" → nome "WhatsApp v1" → Criar (e selecione-o).
+3. Menu ☰ → "APIs e serviços" → "Biblioteca" → procure "Google Calendar API" → Ativar.
+4. "APIs e serviços" → "Tela de permissão OAuth" (ou "Branding"/"Público-alvo" nas contas novas): tipo **Externo**, nome do app "WhatsApp v1", seu e-mail nos dois campos de contato → Salvar. Em "Usuários de teste" (ou "Público-alvo") adicione o seu e-mail. Não precisa publicar nem verificar.
+5. "APIs e serviços" → "Credenciais" → "Criar credenciais" → "ID do cliente OAuth" → tipo **App para computador** → Criar.
+6. Copie o **ID do cliente** (termina com .apps.googleusercontent.com) e o **Segredo do cliente** (GOCSPX-…).
+7. No app: ⋮ → Configurações → Google Agenda → cole os dois → "Conectar Google Agenda". Abre o navegador: escolha a conta, clique em "Continuar" na tela "O Google não verificou este app" (é o seu próprio app) e permita o acesso à agenda. Volta sozinho para o app.
+
+Depois disso: compromissos criados no app (por você ou pela assistente) aparecem na Google Agenda, e o que você marca pelo celular/Google aparece na aba Agenda e no briefing. Sincroniza a cada 10 min (ou "Sincronizar agora" em Configurações). O acesso fica só no seu PC (pasta do app); "Desconectar" apaga.
+
 ## Assistente (novo)
 - Crie grupos/conversas (+ → 👥 Grupo) e mande texto e fotos (📷 na caixa de mensagem).
 - A assistente lê cada mensagem e foto (👁 aparece na mensagem lida), transcreve documentos e cria lembretes 🔔, compromissos e atividades. Ela avisa no chat "Assistente" o que anotou.

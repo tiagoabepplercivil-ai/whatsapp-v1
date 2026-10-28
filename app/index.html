@@ -253,7 +253,14 @@ input,textarea,select{font:inherit;color:var(--text)}
 .notes textarea{display:block;width:100%;border:0;background:transparent;resize:none;font:inherit;font-size:13.5px;line-height:1.45;color:var(--text);max-height:160px;overflow-y:auto;padding:4px 0 0;outline:none}
 .notes.closed textarea{display:none}
 @media (prefers-color-scheme: dark){ .notes{background:#2b2a1c} }
-.todo{max-height:42%;overflow-y:auto;border-bottom:1px solid var(--line);background:var(--bg);flex:none}
+.ptasks{flex:none;max-height:34%;overflow-y:auto;border-bottom:1px solid var(--line);background:var(--bg)}
+.ptasks .todo-h{padding:8px 14px}
+.ptasks .todo-h span button{margin-left:6px}
+.ptasks .task{padding:6px 14px;gap:10px}
+.ptasks .task .tt{font-size:14px}
+.ptasks.closed .task,.ptasks.closed .more{display:none}
+.ptasks .more{display:block;padding:4px 14px 10px;color:var(--teal);font-weight:600;font-size:13px}
+.todo{max-height:30%;overflow-y:auto;border-bottom:1px solid var(--line);background:var(--bg);flex:none}
 .todo-h{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px;font-size:13px;color:var(--muted)}
 .todo-h b{color:var(--text);font-size:14px}
 .todo-h button{color:var(--teal);font-weight:600;font-size:13px;white-space:nowrap}
@@ -331,6 +338,7 @@ input,textarea,select{font:inherit;color:var(--text)}
 <aside class="cal side" id="cal">
   <header class="top"><div class="row"><div class="who"><div class="av" style="background:#d97757;width:38px;height:38px;font-size:15px">✳</div><div style="min-width:0"><div class="n">Assistente</div><div class="st" id="sideStatus">online</div></div></div><button class="icon-btn closecal" id="calClose"><svg viewBox="0 0 24 24"><path d="M19 6.4L17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg></button></div></header>
   <div class="notes" id="notes"><div class="notes-h"><b>📝 Notas importantes</b><button id="notesToggle" title="Recolher/abrir">▾</button></div><textarea id="notesText" rows="3" placeholder="Anote aqui o que não pode esquecer (endereços, números de contrato, combinados). A assistente também escreve aqui."></textarea></div>
+  <div class="ptasks" id="ptasks"></div>
   <div class="todo" id="todo"></div>
   <div class="msgs" id="sideMsgs"></div>
   <div class="compose"><div class="box"><textarea id="sideInput" rows="1" placeholder="Escreva para a assistente"></textarea></div><button class="send" id="sideSend"><svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button></div>

@@ -1,7 +1,7 @@
 {
-  "ui": "1.6.0",
-  "desktop": "1.6.0",
-  "notes": "Assistente mais proativa: lê todas as conversas (abre cada não lida quando o WhatsApp está parado), guarda contexto e memória, dá prioridade e baixa automática, e faz briefings de manhã e no fim do dia.",
+  "ui": "1.7.0",
+  "desktop": "1.7.0",
+  "notes": "Google Agenda de verdade (compromissos vão e vêm da sua agenda), bloco Atividades e Notas importantes no painel da assistente, leitura completa do WhatsApp e histórico no Drive.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",
