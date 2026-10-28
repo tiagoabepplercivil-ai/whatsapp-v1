@@ -54,6 +54,8 @@ function fmtDay(s) {
   if (diff === 0) return 'Hoje'; if (diff === 1) return 'Amanhã'; if (diff === -1) return 'Ontem';
   return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
 }
+// versão curta para listas: Hoje / Amanhã / Ontem / ter 03/11
+function shortDay(s) { const f = fmtDay(s); if (!/,|de /.test(f)) return f; const d = parseLocal(s); return d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '') + ' ' + d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }); }
 const evHour = ev => ev.allDay ? 'dia todo' : fmtHour(ev.start);
 function fmtWhen(ev) { return ev.allDay ? `${fmtDay(ev.start)}, dia todo` : `${fmtDay(ev.start)}, ${fmtHour(ev.start)}${ev.end ? '–' + fmtHour(ev.end) : ''}`; }
 function msgTime(iso) { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
@@ -171,6 +173,7 @@ function renderChats() {
   return h + '<div style="height:90px"></div>';
 }
 function cardTitle(card) {
+  if (card.type === 'sug') return (card.status === 'pendente' || !card.status ? 'Colocar como tarefa? ' : '') + card.titulo;
   if (card.type === 'plan') return 'Plano: ' + (db.plans.find(p => p.id === card.id)?.titulo || '');
   if (card.type === 'event') return db.events.find(e => e.id === card.id)?.title || 'Compromisso removido';
   return db.tasks.find(t => t.id === card.id)?.title || 'Atividade removida';
@@ -266,7 +269,20 @@ function chatStatus(c) {
 }
 function closeChat() { openChatId = null; $('#chat').classList.remove('open'); render(); }
 
+// triagem: só vira cartão o que é pedido/pergunta a ele, promessa dele ou compromisso com ele
+const ORIGENS = { pedido: p => `${p || 'Alguém'} te pediu`, pergunta: p => `${p || 'Alguém'} te perguntou`, promessa: () => 'Você prometeu', compromisso: () => 'Compromisso com você' };
 function cardHtml(card) {
+  if (card.type === 'sug') {
+    const ic = { compromisso: '📅', lembrete: '🔔', responder: '💬' }[card.tipo] || '✅';
+    const st = card.status || 'pendente', alta = card.prioridade === 'alta';
+    const head = st === 'aceita' ? `✓ Virou ${card.eventId ? 'compromisso' : 'atividade'}` : st === 'descartada' ? 'Descartada' : (alta ? '🔴 ' : '') + (ORIGENS[card.origem] ? ORIGENS[card.origem](card.pessoa) : 'Coisa nova') + ' · colocar como tarefa?';
+    const sub = [card.quando ? fmtDay(card.quando) + (card.quando.length > 10 ? ', ' + fmtHour(card.quando) : '') : '', card.pessoa, card.conversa ? '💬 ' + card.conversa : ''].filter(Boolean).join(' · ');
+    const acts = st === 'pendente' ? `<button class="ok" data-act="sug-yes" data-id="${card.id}">✅ Sim, colocar</button><button data-act="sug-no" data-id="${card.id}">Não</button>`
+      : st === 'aceita' ? (card.eventId ? `<button data-event="${card.eventId}">Abrir compromisso</button>` : card.taskId ? `<button data-task="${card.taskId}">Abrir atividade</button>` : '') : '';
+    return `<div class="card sug ${st === 'descartada' ? 'off' : ''}"><div class="ch" ${st === 'pendente' && alta ? 'style="background:#ea0038;color:#fff"' : st !== 'pendente' ? 'style="background:var(--panel);color:var(--muted)"' : ''}>${head}</div><div class="cb">
+      <div class="ct">${ic} ${esc(card.titulo)}</div>${sub ? `<div class="cs">${esc(sub)}</div>` : ''}${card.trecho && st === 'pendente' ? `<div class="cs tq">“${esc(card.trecho.slice(0, 160))}”</div>` : ''}</div>
+      ${acts ? `<div class="acts">${acts}</div>` : ''}</div>`;
+  }
   if (card.type === 'plan') {
     const p = db.plans.find(x => x.id === card.id);
     if (!p) return `<div class="card"><div class="cb cs">Plano removido</div></div>`;
@@ -313,15 +329,25 @@ function msgsHtml(c, menus) {
   }
   return h;
 }
-// bloco "Atividades" do painel: pendentes por data, com o quadradinho para dar baixa
+// bloco "Atividades" do painel: pendentes por data, uma linha cada, quadradinho para dar baixa e ⚡ para preparar a execução
+function ptRow(t) {
+  const late = !t.done && ((t.remindAt && t.remindAt < localISO(new Date())) || (!t.remindAt && t.due && t.due < ymd(new Date())));
+  const when = t.remindAt ? shortDay(t.remindAt) + ', ' + fmtHour(t.remindAt) : t.due ? shortDay(t.due) : '';
+  const src = t.chatId && t.chatId !== 'claude' && db.chats.find(c => c.id === t.chatId);
+  const sub = [when, src && src.name].filter(Boolean).join(' · ');
+  const wait = db.plans.some(p => p.taskId === t.id && p.status === 'aguardando_ok');
+  return `<div class="pt"><input type="checkbox" data-toggle="${t.id}" ${t.done ? 'checked' : ''}><div class="t" data-task="${t.id}"><div class="tt">${esc(t.title)}</div>${sub ? `<div class="s ${late ? 'late' : ''}">${late ? 'atrasada · ' : ''}${esc(sub)}</div>` : ''}</div>`
+    + (wait ? '<span class="pa wait" title="Plano pronto, aguardando seu ok no chat">🗂</span>' : `<button class="pa" data-act="task-plan" data-id="${t.id}" title="Preparar execução (deixo a mensagem pronta, marco, anoto)">⚡</button>`) + '</div>';
+}
 function renderPTasks() {
   const box = $('#ptasks'); if (!box) return;
   const key = t => t.remindAt || (t.due ? t.due + 'T23:59' : '9999');
   const pend = db.tasks.filter(t => !t.done).sort((a, b) => key(a).localeCompare(key(b)));
-  const closed = !!db.meta.ptasksClosed, show = pend.slice(0, 8);
+  const closed = !!db.meta.ptasksClosed, show = pend.slice(0, 8), sug = (db.inbox || []).length;
   box.classList.toggle('closed', closed);
-  box.innerHTML = `<div class="todo-h"><b>☑️ Atividades · ${pend.length}</b><span><button data-view="tasks">ver tudo</button><button data-act="ptasks-toggle" title="Recolher/abrir">${closed ? '▸' : '▾'}</button></span></div>`
-    + (pend.length ? show.map(t => taskRow(t).replace('</div></div>', `${db.plans.some(p => p.taskId === t.id && p.status === 'aguardando_ok') ? '<div class="pl">🗂 plano aguardando seu ok</div>' : `<div class="pl" data-act="task-plan" data-id="${t.id}">⚡ preparar execução</div>`}</div></div>`)).join('') + (pend.length > show.length ? `<button class="more" data-view="tasks">+ ${pend.length - show.length} na aba Atividades</button>` : '') : '<div class="todo-h"><span>Nenhuma atividade pendente.</span></div>');
+  box.innerHTML = `<div class="todo-h"><b>Atividades · ${pend.length}</b><span><button data-view="tasks">ver tudo</button><button data-act="ptasks-toggle" title="Recolher/abrir">${closed ? '▸' : '▾'}</button></span></div>`
+    + (sug > 1 ? `<div class="sugbar"><span>💡 ${sug} coisas novas esperando sua resposta no chat</span><button data-act="inbox-all">Sim para todas</button></div>` : '')
+    + (pend.length ? show.map(ptRow).join('') + (pend.length > show.length ? `<button class="more" data-view="tasks">+ ${pend.length - show.length} na aba Atividades</button>` : '') : '<div class="sugbar"><span>Nenhuma atividade pendente.</span></div>');
 }
 function renderSide() {
   const box = $('#sideMsgs'); if (!box) return;
@@ -330,23 +356,7 @@ function renderSide() {
   box.innerHTML = msgsHtml({ ...c, messages: c.messages.slice(-60) }, false); hydrateImgs(box);
   if (atBottom || !renderSide.done) box.scrollTop = box.scrollHeight; renderSide.done = true;
   if (sideVisible() && !document.hidden && c.unread) { c.unread = 0; save(); }
-  // A fazer (sugestões vindas do WhatsApp)
-  const inbox = db.inbox || [];
-  const pend = db.tasks.filter(t => !t.done).length;
-  let h = '';
-  if (inbox.length) {
-    h += `<div class="todo-h"><b>📋 A fazer · ${inbox.length} novo(s)</b><button data-act="inbox-all">Adicionar tudo</button></div>`;
-    for (const it of inbox.slice(0, 30)) {
-      const ic = it.tipo === 'compromisso' ? '📅' : it.tipo === 'lembrete' ? '🔔' : it.tipo === 'responder' ? '💬' : '✅';
-      h += `<div class="todo-i ${it.prioridade === 'alta' ? 'alta' : ''}"><div class="tx"><div class="tt">${it.prioridade === 'alta' ? '<span class="pri">urgente</span> ' : ''}${ic} ${esc(it.titulo)}</div>
-        <div class="ts">${it.quando ? esc(fmtDay(it.quando)) + (it.quando.length > 10 ? ', ' + fmtHour(it.quando) : '') + ' · ' : ''}${it.pessoa ? esc(it.pessoa) + ' · ' : ''}💬 ${esc(it.conversa || 'WhatsApp')}</div>
-        ${it.trecho ? `<div class="tq">“${esc(it.trecho.slice(0, 140))}”</div>` : ''}</div>
-        <div class="ta"><button class="ok" data-act="inbox-ok" data-id="${it.id}" title="Adicionar">✓</button><button class="no" data-act="inbox-no" data-id="${it.id}" title="Descartar">✕</button></div></div>`;
-    }
-  } else {
-    h += `<div class="todo-h"><span>${DESK && db.settings.waRead !== false ? '👁 Lendo seu WhatsApp. Nada novo a fazer.' : 'Nada novo a fazer.'}</span>${pend ? `<button data-view="tasks">${pend} pendente(s)</button>` : ''}</div>`;
-  }
-  $('#todo').innerHTML = h; renderPTasks();
+  renderPTasks();
   $('#sideStatus').textContent = waSweeping ? (waSweepFull ? 'lendo todas as conversas…' : 'abrindo as conversas não lidas…') : reading || waBusy ? 'lendo mensagens…' : (DESK && db.settings.waRead !== false ? 'lendo seu WhatsApp' : 'online');
 }
 function pushMsg(chatId, msg) {
@@ -396,7 +406,7 @@ const TOOLS = [
   { name: 'preparar_plano', description: 'Monta o plano de execução de uma atividade e mostra um cartão para o usuário aprovar com "ok". NADA é executado sem o ok dele. Use quando ele pedir para resolver/responder/cobrar/marcar/avisar algo, ou quando uma atividade puder ser resolvida com uma mensagem no WhatsApp. Passos: whatsapp (conversa = nome exatamente como na lista do WhatsApp; mensagem pronta em primeira pessoa, no tom dele: direto, educado, sem floreio), compromisso, lembrete, nota, concluir (dar baixa na atividade que o plano resolve). Depois de chamar, responda em UMA linha (o cartão já mostra os passos).',
     input_schema: { type: 'object', properties: { titulo: { type: 'string', description: 'Ex.: "Responder Alex sobre a vistoria"' }, atividade_id: { type: 'string', description: 'id da atividade relacionada, se houver' },
       passos: { type: 'array', items: { type: 'object', properties: { tipo: { type: 'string', enum: ['whatsapp', 'compromisso', 'lembrete', 'nota', 'concluir'] }, conversa: { type: 'string' }, mensagem: { type: 'string' }, titulo: { type: 'string' }, inicio: { type: 'string', description: 'compromisso: YYYY-MM-DDTHH:MM' }, fim: { type: 'string' }, local: { type: 'string' }, quando: { type: 'string', description: 'lembrete: YYYY-MM-DDTHH:MM' }, texto: { type: 'string', description: 'nota' }, atividade_id: { type: 'string', description: 'concluir' } }, required: ['tipo'] } } }, required: ['titulo', 'passos'] } },
-  { name: 'anotar', description: 'Escreve no bloco "Notas importantes" do usuário (topo do painel): informação de referência que ele vai precisar consultar depois — endereço de obra, número de contrato/processo, valor combinado, código, horário fixo, decisão. Não use para tarefas (use criar_atividade) nem compromissos.',
+  { name: 'anotar', description: 'Escreve nas "Notas importantes" do usuário (botão 📝 no cabeçalho do painel): informação de referência que ele vai precisar consultar depois — endereço de obra, número de contrato/processo, valor combinado, código, horário fixo, decisão. Não use para tarefas (use criar_atividade) nem compromissos.',
     input_schema: { type: 'object', properties: { texto: { type: 'string', description: 'Uma frase curta e completa' } }, required: ['texto'] } },
   { name: 'ler_historico', description: 'Lê as últimas mensagens de uma conversa do WhatsApp no histórico completo (arquivo no Drive). Use para "o que o fulano falou", "como ficou aquilo com X", "me atualiza sobre a obra Y".',
     input_schema: { type: 'object', properties: { conversa: { type: 'string', description: 'Nome (ou parte) da conversa ou grupo' }, linhas: { type: 'integer', description: 'Quantas linhas do fim (padrão 60)' } }, required: ['conversa'] } },
@@ -828,8 +838,8 @@ document.addEventListener('click', async e => {
     case 'upd-go': updGo(); break;
     case 'upd-later': if ($('#updBar')) $('#updBar').style.display = 'none'; break;
     case 'ptasks-toggle': db.meta.ptasksClosed = !db.meta.ptasksClosed; save(); renderPTasks(); break;
-    case 'inbox-ok': acceptInbox(id); break;
-    case 'inbox-no': db.inbox = db.inbox.filter(x => x.id !== id); save(); renderSide(); break;
+    case 'inbox-ok': case 'sug-yes': if (db.inbox.some(x => x.id === id)) acceptInbox(id); else { sugResolve(id, 'descartada'); save(); renderSide(); } break;
+    case 'inbox-no': case 'sug-no': db.inbox = db.inbox.filter(x => x.id !== id); sugResolve(id, 'descartada'); save(); renderSide(); render(); break;
     case 'inbox-all': [...db.inbox].forEach(x => acceptInbox(x.id, true)); render(); break;
     case 'apply-update': { el.textContent = 'Atualizando…'; el.disabled = true; const r = await window.wv1desk.applyUpdate(); if (r && r.error) { toast('Falhou: ' + r.error); closeSheet(); } break; }
     case 'new-chat': if (tab === 'agenda') eventForm({}); else if (tab === 'tasks') taskForm({}); else newChatSheet(); break;
@@ -918,19 +928,20 @@ function findMsg(id) { return db.chats.find(x => x.id === openChatId).messages.f
 $('#sheetBg').addEventListener('click', e => { if (e.target.id === 'sheetBg') closeSheet(); });
 $('#calScrim').addEventListener('click', () => openCal(false));
 $('#calClose').addEventListener('click', () => openCal(false));
-// bloco de notas importantes (topo do painel da assistente): ele escreve, a assistente acrescenta; cópia em Notas.md no Drive
+// notas importantes: abrem pelo botão 📝 no cabeçalho da assistente; ele escreve, a assistente acrescenta (ponto verde = nota nova); cópia em Notas.md no Drive
 let notesTimer = null;
 function notesSync() { clearTimeout(notesTimer); notesTimer = setTimeout(() => { if (DESK && window.wv1desk.notesSave) window.wv1desk.notesSave({ text: db.notes }).catch(() => {}); }, 1500); }
 function notesFit() { const t = $('#notesText'); if (!t) return; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 2, 160) + 'px'; }
-function renderNotes() { const t = $('#notesText'); if (!t) return; if (t.value !== db.notes) t.value = db.notes; $('#notes').classList.toggle('closed', !!db.meta.notesClosed); $('#notesToggle').textContent = db.meta.notesClosed ? '▸' : '▾'; notesFit(); }
+function renderNotes() { const t = $('#notesText'); if (!t) return; if (t.value !== db.notes) t.value = db.notes; $('#notes').classList.toggle('show', !!db.meta.notesOpen); if (db.meta.notesOpen) db.meta.notesNew = false; $('#notesDot')?.classList.toggle('on', !!db.meta.notesNew); notesFit(); }
 function addNote(text) {
   const t = String(text || '').trim().replace(/^[•\-*]\s*/, ''); if (!t) return false;
   if (db.notes.toLowerCase().includes(t.toLowerCase())) return false;
-  db.notes = (db.notes.trim() ? db.notes.replace(/\s+$/, '') + '\n' : '') + '• ' + t; save(); renderNotes(); notesSync(); return true;
+  db.notes = (db.notes.trim() ? db.notes.replace(/\s+$/, '') + '\n' : '') + '• ' + t; if (!db.meta.notesOpen) db.meta.notesNew = true; save(); renderNotes(); notesSync(); return true;
 }
 if ($('#notesText')) {
   $('#notesText').addEventListener('input', () => { db.notes = $('#notesText').value; save(); notesFit(); notesSync(); });
-  $('#notesToggle').addEventListener('click', () => { db.meta.notesClosed = !db.meta.notesClosed; save(); renderNotes(); });
+  $('#notesToggle').addEventListener('click', () => { db.meta.notesOpen = false; save(); renderNotes(); });
+  $('#notesBtn')?.addEventListener('click', () => { db.meta.notesOpen = !db.meta.notesOpen; save(); renderNotes(); if (db.meta.notesOpen) $('#notesText').focus(); });
   renderNotes();
 }
 $('#sideSend').addEventListener('click', () => sendSide());
@@ -1008,7 +1019,7 @@ if (DESK) {
   });
 }
 
-// ---------- leitura automática do WhatsApp → lista "A fazer" ----------
+// ---------- leitura automática do WhatsApp → cartões "Colocar como tarefa?" no chat da assistente ----------
 db.inbox = db.inbox || []; db.meta.waSeen = db.meta.waSeen || []; db.waLog = db.waLog || []; db.facts = db.facts || []; if (typeof db.notes !== 'string') db.notes = ''; db.plans = db.plans || [];
 if (db.settings.profile === undefined) db.settings.profile = 'Engenheiro civil em Joinville/SC. Trojan Engenharia (projetos, controle tecnológico de pavimentação, investigação geotécnica, supervisão de contratos públicos) e Grupo NEV (sócio da NEV Geotecnia; sócio: Alex Rafael Niepiçuy).';
 const waCtx = {}; db.waLog.slice(-600).forEach(m => { (waCtx[m.chat] = waCtx[m.chat] || []).push(m); });
@@ -1058,25 +1069,32 @@ function addInbox(it) {
   if (!key || db.inbox.some(x => x.titulo.toLowerCase() === key) || db.tasks.some(t => !t.done && t.title.toLowerCase() === key)) return;
   let quando = (it.quando || '').slice(0, 16), titulo = it.titulo;
   if (it.tipo === 'responder') { if (!/^respond/i.test(titulo)) titulo = 'Responder ' + (it.pessoa || it.conversa || '') + ': ' + titulo; if (quando.length < 16) quando = localISO(new Date(Date.now() + 2 * 3600e3)); }
-  const item = { id: uid(), tipo: it.tipo || 'atividade', titulo, quando, conversa: it.conversa || '', pessoa: it.pessoa || '', prioridade: it.prioridade || 'media', motivo: it.motivo || '', trecho: it.trecho || '', ts: new Date().toISOString() };
+  const item = { id: uid(), origem: it.origem || (it.tipo === 'compromisso' ? 'compromisso' : 'pedido'), tipo: it.tipo || 'atividade', titulo, quando, conversa: it.conversa || '', pessoa: it.pessoa || '', prioridade: it.prioridade || 'media', motivo: it.motivo || '', trecho: it.trecho || '', ts: new Date().toISOString() };
   db.inbox.unshift(item);
-  if (db.settings.waAuto) acceptInbox(item.id, true);
+  if (db.settings.waAuto) acceptInbox(item.id, true); else askInbox(item);
   return item;
 }
+// toda coisa nova vira um cartão no chat da assistente perguntando se entra como tarefa (Sim / Não)
+function askInbox(it) {
+  if (it.card) return; it.card = 1;
+  pushMsg('claude', { from: 'them', card: { type: 'sug', id: it.id, origem: it.origem, tipo: it.tipo, titulo: it.titulo, quando: it.quando, pessoa: it.pessoa, conversa: it.conversa, trecho: it.trecho, prioridade: it.prioridade, status: 'pendente' } });
+}
+function sugMsg(id) { return db.chats.find(c => c.id === 'claude').messages.find(m => m.card && m.card.type === 'sug' && m.card.id === id); }
+function sugResolve(id, status, ref) { const m = sugMsg(id); if (!m) return false; m.card.status = status; if (ref) Object.assign(m.card, ref); return true; }
 function acceptInbox(id, quiet) {
   const it = db.inbox.find(x => x.id === id); if (!it) return;
   db.inbox = db.inbox.filter(x => x.id !== id);
   const notes = it.conversa ? `Do WhatsApp (${it.conversa}): ${it.trecho}` : it.trecho;
   if (it.tipo === 'compromisso' && it.quando.length > 10) {
     const ev = addEvent({ title: it.titulo, start: it.quando, notes, chatId: 'claude' });
-    pushMsg('claude', { from: 'them', card: { type: 'event', id: ev.id } });
+    if (!sugResolve(id, 'aceita', { eventId: ev.id })) pushMsg('claude', { from: 'them', card: { type: 'event', id: ev.id } });
   } else {
     const remindAt = it.tipo === 'lembrete' || it.tipo === 'responder' || it.quando.length > 10 ? (it.quando.length > 10 ? it.quando : (it.quando ? it.quando + 'T08:00' : '')) : '';
     const t = addTask({ title: it.titulo, due: it.quando.slice(0, 10), remindAt, chatId: 'claude' });
-    pushMsg('claude', { from: 'them', card: { type: 'task', id: t.id, remind: !!remindAt } });
+    if (!sugResolve(id, 'aceita', { taskId: t.id })) pushMsg('claude', { from: 'them', card: { type: 'task', id: t.id, remind: !!remindAt } });
     if (it.tipo === 'responder' && !quiet && db.settings.apiKey) setTimeout(() => planForTask(t.id), 300); // já deixa a resposta pronta para o ok
   }
-  save(); if (!quiet) render();
+  save(); if (!quiet) render(); else renderSide();
 }
 async function flushWa() {
   if (waBusy) { waTimer = setTimeout(flushWa, 5000); return; }
@@ -1101,7 +1119,12 @@ async function flushWa() {
           system: `Você é a secretária executiva de ${db.settings.myName || 'o usuário'}. Perfil dele: ${db.settings.profile || '(não informado)'}
 O que você já sabe (memória):\n${db.facts.slice(-60).map(f => '- ' + f).join('\n') || '(nada ainda)'}
 Você lê as mensagens novas do WhatsApp dele ("Eu" = ele) e age como uma secretária atenta e proativa:
-1) Extraia TUDO que exige ação dele ou que ele precisa lembrar: pedidos feitos a ele, perguntas dirigidas a ele ainda sem resposta (tipo "responder"), prazos, entregas, pagamentos, cobranças, documentos a enviar, reuniões/visitas/vistorias com data, e promessas que ele mesmo fez ("Eu: mando amanhã").
+1) Faça TRIAGEM. Em "itens" entra só o que é com ele, em uma destas origens:
+   - pedido: alguém pediu a ELE para fazer, enviar, pagar, decidir, conferir ou comparecer (conversa privada, ou no grupo citando o nome dele ou o papel dele);
+   - pergunta: pergunta dirigida a ELE que ainda não teve resposta dele (tipo "responder");
+   - promessa: ele mesmo se comprometeu ("Eu: mando amanhã", "Eu: vejo e te falo");
+   - compromisso: reunião, visita, vistoria, prazo ou entrega com data que envolve ele.
+   NÃO entra em "itens": mensagem só informativa, aviso geral de grupo, pedido feito a outra pessoa, tarefa de outro, assunto que ele já respondeu ou resolveu, agradecimento, "ok", "bom dia". Se for informação de trabalho, vai só para "resumos" ou "notas". Na dúvida se o pedido é para ele, não coloque. Cada item vira um cartão que ele precisa aprovar, então seja seletiva: pouco e certo.
 2) Dê baixa no que já foi feito: se as mensagens mostram que ele já cumpriu algo dos pendentes (ex.: "Eu: enviado", "Eu: já paguei"), liste o id em "concluidas".
 3) Aprenda: fatos úteis e duradouros sobre pessoas, obras, clientes e empresas (quem é quem, papéis, locais, prazos de contrato) vão em "fatos", uma frase curta cada, só se forem novos. Nada de saúde, política, fofoca ou dados sensíveis.
 4) Resuma: para cada conversa com novidade de trabalho (decisão, pedido, número, prazo, combinado), 1 a 3 frases objetivas em "resumos", mesmo sem ação para ele. Conversa só social não entra.
@@ -1112,9 +1135,10 @@ Agora: ${localISO(now)} (${now.toLocaleDateString('pt-BR', { weekday: 'long' })}
 Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '(nenhum)'}\nSugestões ainda não confirmadas (não repita):\n${sug || '(nenhuma)'}\nSe não houver nada novo, chame a ferramenta com listas vazias.`,
           tools: [{ name: 'itens_a_fazer', description: 'Resultado da leitura', input_schema: { type: 'object', properties: {
             itens: { type: 'array', items: { type: 'object', properties: {
+              origem: { type: 'string', enum: ['pedido', 'pergunta', 'promessa', 'compromisso'], description: 'Por que é com ele (triagem)' },
               tipo: { type: 'string', enum: ['compromisso', 'lembrete', 'atividade', 'responder'] }, titulo: { type: 'string', description: 'Ação curta e concreta, ex.: "Enviar laudo SPT ao Alex"; para responder: "Responder Alex: data da vistoria"' },
               quando: { type: 'string', description: 'YYYY-MM-DDTHH:MM ou YYYY-MM-DD; vazio se não houver' }, conversa: { type: 'string' }, pessoa: { type: 'string', description: 'Quem pediu/perguntou' },
-              prioridade: { type: 'string', enum: ['alta', 'media', 'baixa'] }, trecho: { type: 'string', description: 'Trecho da mensagem que originou' }, motivo: { type: 'string', description: 'Uma linha: por que isso importa' } }, required: ['tipo', 'titulo', 'conversa', 'prioridade'] } },
+              prioridade: { type: 'string', enum: ['alta', 'media', 'baixa'] }, trecho: { type: 'string', description: 'Trecho da mensagem que originou' }, motivo: { type: 'string', description: 'Uma linha: por que isso importa' } }, required: ['origem', 'tipo', 'titulo', 'conversa', 'prioridade'] } },
             concluidas: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, motivo: { type: 'string' } }, required: ['id'] } },
             fatos: { type: 'array', items: { type: 'string' } },
             resumos: { type: 'array', items: { type: 'object', properties: { conversa: { type: 'string' }, resumo: { type: 'string' } }, required: ['conversa', 'resumo'] } },
@@ -1124,7 +1148,7 @@ Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '
       });
       const data = await r.json(); if (!r.ok) throw new Error(data?.error?.message || ('HTTP ' + r.status));
       const use = data.content.find(b => b.type === 'tool_use'), out = use?.input || {};
-      const novos = (out.itens || []).map(addInbox).filter(Boolean);
+      const novos = (out.itens || []).filter(it => ORIGENS[it.origem]).map(addInbox).filter(Boolean); // triagem: só o que é com ele
       const baixas = [];
       for (const c of out.concluidas || []) { const t = db.tasks.find(x => x.id === c.id && !x.done); if (t) { t.done = true; baixas.push(t.title + (c.motivo ? ' (' + c.motivo + ')' : '')); } }
       for (const f of out.fatos || []) { const k = String(f).trim(); if (k && k.length < 200 && !db.facts.some(x => x.toLowerCase() === k.toLowerCase())) db.facts.push(k); }
@@ -1133,7 +1157,6 @@ Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '
       if (sums.length && DESK && db.settings.driveLog !== false) window.wv1desk.summaryAppend({ date: ymd(now), text: sums.join('\n\n') }).then(refreshSums).catch(() => {});
       // proativa: conta o que anotou e avisa na hora o que é urgente
       const lines = [];
-      if (novos.length && !db.settings.waAuto) lines.push('📥 Do WhatsApp anotei (confira na lista acima):\n' + novos.map(n => `• ${n.prioridade === 'alta' ? '🔴 ' : ''}${n.titulo}${n.pessoa ? ' — ' + n.pessoa : ''}`).join('\n'));
       if (baixas.length) lines.push('✅ Dei baixa: ' + baixas.join('; '));
       const notas = (out.notas || []).filter(addNote);
       if (notas.length) lines.push('📝 Anotei nas notas: ' + notas.join('; '));
@@ -1392,6 +1415,7 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferr
 $('#btnInstall').addEventListener('click', async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; $('#btnInstall').style.display = 'none'; });
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
+db.inbox.slice().reverse().forEach(askInbox); // sugestões que estavam no antigo "A fazer" viram cartões Sim/Não
 render();
 tick();
 if (db.settings.apiKey) setTimeout(() => readAll(false), 1500);

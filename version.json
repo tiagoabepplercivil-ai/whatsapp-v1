@@ -1,7 +1,7 @@
 {
-  "ui": "1.8.1",
-  "desktop": "1.8.1",
-  "notes": "Downloads do WhatsApp agora caem na pasta \"Dowload whas app\" da Área de Trabalho (troca em Configurações). Continua guardando cópia no Drive.",
+  "ui": "1.8.2",
+  "desktop": "1.8.2",
+  "notes": "Ícone do WhatsApp. Painel mais limpo: notas no botão 📝, Atividades no alto. Coisa nova vira cartão \"colocar como tarefa?\" com Sim/Não, só para o que pedem ou perguntam a você.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",
@@ -11,8 +11,9 @@
     "manifest.webmanifest",
     "icons/icon-192.png",
     "icons/icon-512.png",
+    "icons/icon-maskable-512.png",
     "icons/tray.png"
   ],
   "installerUrl": "https://raw.githubusercontent.com/tiagoabepplercivil-ai/whatsapp-v1/installer/WhatsApp-v1-Instalador.exe",
-  "sha256": "7537100f2ab2dc879666d807df1afa4b9cee774c6dc3b3377b0822047ab3eefa"
+  "sha256": "528edd317a6f78ce58bcefc79b8de9322712182e108d451883ab38f91de0d7de"
 }

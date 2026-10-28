@@ -213,6 +213,8 @@ const BUNDLED = path.join(__dirname, 'app');
 const uiDir = () => path.join(app.getPath('userData'), 'ui');
 const cmp = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; };
 const verOf = dir => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'version.json'), 'utf8')).ui || '0'; } catch { return '0'; } };
+// ícones da janela e da bandeja vêm da interface ativa: um ícone novo pode chegar pelo ⟳, sem instalador
+const iconPath = f => { for (const d of [activeRoot(), BUNDLED]) { const p = path.join(d, 'icons', f); if (fs.existsSync(p)) return p; } return path.join(__dirname, 'app/icons', f); };
 function activeRoot() { const d = uiDir(); return fs.existsSync(path.join(d, 'index.html')) && cmp(verOf(d), verOf(BUNDLED)) > 0 ? d : BUNDLED; }
 // o leitor do WhatsApp (app/wa-reader.js) é entregue ao preload do webview a partir da pasta ativa, então o ⟳ também o atualiza
 ipcMain.on('wv1:reader-src', e => { let src = ''; for (const d of [activeRoot(), BUNDLED]) { try { src = fs.readFileSync(path.join(d, 'wa-reader.js'), 'utf8'); break; } catch {} } e.returnValue = src; });
@@ -293,7 +295,7 @@ const toAssistant = data => win && win.webContents.send('wv1:to-assistant', data
 function createWindow() {
   win = new BrowserWindow({
     width: 1400, height: 880, minWidth: 420, minHeight: 560,
-    title: 'WhatsApp', icon: path.join(__dirname, 'app/icons/icon-512.png'),
+    title: 'WhatsApp', icon: iconPath('icon-512.png'),
     backgroundColor: '#f0f2f5', autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, backgroundThrottling: false, webviewTag: true, spellcheck: true, preload: path.join(__dirname, 'preload.js') }
   });
@@ -350,7 +352,7 @@ app.whenReady().then(() => {
   // backup e .ics do próprio app vão para a mesma pasta
   session.defaultSession.on('will-download', (_, item) => toDownloads(item, f => saved(f, { downloads: f, name: path.basename(f), appFile: true })));
   createWindow();
-  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'app/icons/tray.png')));
+  tray = new Tray(nativeImage.createFromPath(iconPath('tray.png')));
   tray.setToolTip('WhatsApp');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Abrir', click: show },
