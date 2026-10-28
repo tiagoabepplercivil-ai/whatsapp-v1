@@ -30,7 +30,8 @@ Para atualizar depois: arraste a pasta nova no mesmo lugar.
 - No chat Assistente: "📖 Ler todas as conversas", "Meus lembretes", ou perguntas como "qual a data da minha crisma?" (ela busca nas conversas e fotos).
 - Na hora do lembrete: cartão vermelho no chat + aviso no celular (ative em ⋮ → Configurações → Ativar avisos). Todo dia, ao abrir o app, ela manda o resumo do dia.
 - Por conversa (⋮): ligar/desligar a leitura, ou mandar reler tudo.
-- Ela só lê as conversas DO WhatsApp v1. Não tem acesso ao WhatsApp real (a Meta não permite). Para usar algo do WhatsApp real, encaminhe/salve a foto e mande aqui.
+- No computador ela lê o WhatsApp Web que está dentro do app: a conversa aberta, as prévias das não lidas e, quando você não está usando (90 s parado) ou está em outra aba do app, abre cada conversa não lida para ler (e todas, a cada 2 h). Abrir marca a conversa como lida no WhatsApp (visto azul, se ativo). Desligue em ⋮ → Configurações → "Ler tudo". "📖 Ler todo o WhatsApp" no chat da assistente força a leitura agora.
+- Tudo que ela lê fica no Drive: `WhatsApp v1/Conversas/<conversa>.md` (texto por dia) e `WhatsApp v1/Resumos/AAAA-MM-DD.md` (resumos dela). Ela busca nesses arquivos ao responder, e os resumos dos últimos 3 dias já ficam no contexto dela.
 - Sem chave da API: ela só cria lembretes quando a mensagem tem data e hora simples ("levar documento sexta 10h"). Fotos só são lidas com a chave.
 
 ## O que tem

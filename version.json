@@ -1,12 +1,13 @@
 {
-  "ui": "1.5.0",
-  "desktop": "1.5.0",
-  "notes": "Fotos das conversas e documentos baixados no WhatsApp vão para a pasta do Google Drive, separados por conversa.",
+  "ui": "1.6.0",
+  "desktop": "1.6.0",
+  "notes": "Assistente mais proativa: lê todas as conversas (abre cada não lida quando o WhatsApp está parado), guarda contexto e memória, dá prioridade e baixa automática, e faz briefings de manhã e no fim do dia.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",
     "app.js",
     "sw.js",
+    "wa-reader.js",
     "manifest.webmanifest",
     "icons/icon-192.png",
     "icons/icon-512.png",

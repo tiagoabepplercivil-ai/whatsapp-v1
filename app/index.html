@@ -196,10 +196,12 @@ input,textarea,select{font:inherit;color:var(--text)}
   #rbUpd.has{color:var(--teal)}
   .filters::-webkit-scrollbar,.quick::-webkit-scrollbar{display:none}
   .listpane .filters{gap:6px}
-  .wa{flex:1;min-width:0;position:relative}
+  .mainarea{flex:1;min-width:0;position:relative;display:flex}
+  .mainarea .app{flex:1;min-width:0}
+  .wa{position:absolute;inset:0;opacity:0;pointer-events:none;z-index:0}
   .wa webview{position:absolute;inset:0;width:100%;height:100%;border:0}
-  body.view-wa .wa{display:block}
-  body.view-wa .app{display:none}
+  body.view-wa .wa{display:block;opacity:1;pointer-events:auto;z-index:2}
+  body.view-wa .app{visibility:hidden}
   .app{flex-direction:row}
   .listpane{width:clamp(340px,32%,480px);flex:none;display:flex;flex-direction:column;border-right:1px solid var(--line);position:relative;min-height:0}
   .listpane .top{border-bottom:0;padding-top:10px}
@@ -255,6 +257,8 @@ input,textarea,select{font:inherit;color:var(--text)}
 .todo-i .tq{font-size:12px;color:var(--muted);margin-top:3px;font-style:italic;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .todo-i .ta{display:flex;flex-direction:column;gap:4px}
 .todo-i .ta button{width:30px;height:30px;border-radius:50%;font-weight:700}
+.todo-i.alta{border-left:3px solid #ea0038}
+.pri{display:inline-block;background:#ea0038;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;text-transform:uppercase;vertical-align:middle}
 .todo-i .ok{background:#d9fdd3;color:#008069}
 .todo-i .no{background:var(--panel);color:var(--muted)}
 @media (min-width:900px){ .cal.side{width:380px} }
@@ -273,6 +277,7 @@ input,textarea,select{font:inherit;color:var(--text)}
   <button class="rb" id="rbCal" title="Mostrar/ocultar assistente"><svg viewBox="0 0 24 24"><path d="M3 5v14h18V5H3zm16 12h-5V7h5v10z"/></svg></button>
   <button class="rb" data-act="settings" title="Configurações"><svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 000-2l2.1-1.6-2-3.5-2.5 1a7.3 7.3 0 00-1.7-1L15 3.3h-4l-.4 2.6a7.3 7.3 0 00-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 000 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1l.4 2.6h4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5-2.3-1.6zM13 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z" transform="translate(-1 0)"/></svg></button>
 </nav>
+<div class="mainarea">
 <div class="wa" id="waPane"></div>
 <div class="app" id="app">
  <div class="listpane">
@@ -313,6 +318,7 @@ input,textarea,select{font:inherit;color:var(--text)}
       <button class="send" id="send"><svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button>
     </div>
   </section>
+</div>
 </div>
 <div class="calscrim" id="calScrim"></div>
 <aside class="cal side" id="cal">

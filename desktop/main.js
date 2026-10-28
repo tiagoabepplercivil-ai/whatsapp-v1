@@ -46,6 +46,66 @@ ipcMain.handle('wv1:save-file', (_, d) => { const m = /^data:([^;]+);base64,(.*)
 ipcMain.on('wa-chat', (_, name) => { if (name) currentChat = name; });
 ipcMain.on('wa-media', (_, d) => saveBuffer(d));
 
+// histórico no Drive: cada conversa lida vira <base>/Conversas/<nome>.md (um "## dia" por data, uma linha por mensagem)
+// e os resumos escritos pela assistente vão para <base>/Resumos/AAAA-MM-DD.md. A assistente busca nesses arquivos.
+const logDir = () => path.join(baseDir(), 'Conversas'), sumDir = () => path.join(baseDir(), 'Resumos');
+const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+function lastDayOf(f) { // último "## AAAA-MM-DD" do arquivo, lendo só o fim
+  try { const fd = fs.openSync(f, 'r'), size = fs.fstatSync(fd).size, n = Math.min(size, 4000), b = Buffer.alloc(n); fs.readSync(fd, b, 0, n, size - n); fs.closeSync(fd); const m = b.toString('utf8').match(/^## (\d{4}-\d{2}-\d{2})/mg); return m ? m[m.length - 1].slice(3) : ''; } catch { return ''; }
+}
+ipcMain.handle('wv1:log-append', (_, { chat, lines }) => {
+  try {
+    fs.mkdirSync(logDir(), { recursive: true });
+    const f = path.join(logDir(), clean(chat) + '.md'), exists = fs.existsSync(f);
+    let day = exists ? lastDayOf(f) : '', out = exists ? '' : `# ${chat}\n`;
+    for (const l of lines || []) {
+      const d = String(l.when).slice(0, 10);
+      if (d !== day) { out += `\n## ${d}\n`; day = d; }
+      out += `- ${String(l.when).slice(11, 16)} ${l.who}: ${String(l.text).replace(/\s*\n\s*/g, ' / ')}\n`;
+    }
+    if (out) fs.appendFileSync(f, out);
+  } catch (e) { console.warn('histórico:', e.message); }
+});
+ipcMain.handle('wv1:summary-append', (_, { date, text }) => {
+  try { fs.mkdirSync(sumDir(), { recursive: true }); const f = path.join(sumDir(), date + '.md'); fs.appendFileSync(f, (fs.existsSync(f) ? '' : `# Resumo de ${date}\n`) + '\n' + text + '\n'); } catch (e) { console.warn('resumo:', e.message); }
+});
+ipcMain.handle('wv1:log-search', (_, { texto, conversa, limite }) => {
+  const terms = norm(texto).split(/\s+/).filter(w => w.length > 2), cn = norm(conversa), hits = [];
+  for (const [dir, kind] of [[logDir(), 'conversa'], [sumDir(), 'resumo']]) {
+    let files = []; try { files = fs.readdirSync(dir).filter(x => x.endsWith('.md')).sort(); } catch { continue; }
+    for (const file of files) {
+      const name = file.slice(0, -3);
+      if (cn && kind === 'conversa' && !norm(name).includes(cn)) continue;
+      let day = kind === 'resumo' ? name : '';
+      for (const line of fs.readFileSync(path.join(dir, file), 'utf8').split('\n')) {
+        if (line.startsWith('## ')) { day = line.slice(3).trim(); continue; }
+        if (kind === 'conversa' ? !line.startsWith('- ') : (!line.trim() || line.startsWith('# '))) continue;
+        const n = norm(line), score = terms.filter(t => n.includes(t)).length;
+        if (!terms.length || score) hits.push({ origem: kind === 'resumo' ? 'resumo do dia' : name + ' (WhatsApp)', data: day, texto: line.replace(/^(- |### )/, '').slice(0, 400), score });
+      }
+    }
+  }
+  hits.sort((a, b) => b.score - a.score || b.data.localeCompare(a.data));
+  return hits.slice(0, limite || 40).map(({ score, ...h }) => h).sort((a, b) => a.data.localeCompare(b.data));
+});
+ipcMain.handle('wv1:summary-recent', (_, { dias, max }) => { // últimos dias de resumos, para a assistente já saber sem procurar
+  try {
+    const files = fs.readdirSync(sumDir()).filter(x => /^\d{4}-\d{2}-\d{2}\.md$/.test(x)).sort().slice(-(dias || 3));
+    let out = files.map(f => fs.readFileSync(path.join(sumDir(), f), 'utf8').trim()).join('\n\n');
+    if (out.length > (max || 3500)) out = '…' + out.slice(-(max || 3500));
+    return out;
+  } catch { return ''; }
+});
+ipcMain.handle('wv1:log-read', (_, { conversa, linhas }) => {
+  try {
+    const files = fs.readdirSync(logDir()).filter(x => x.endsWith('.md')), q = norm(conversa);
+    const f = files.find(x => norm(x.slice(0, -3)) === q) || files.find(x => norm(x.slice(0, -3)).includes(q));
+    if (!f) return { erro: 'conversa não encontrada no histórico', conversas_disponiveis: files.map(x => x.slice(0, -3)).slice(0, 80) };
+    const ls = fs.readFileSync(path.join(logDir(), f), 'utf8').split('\n').filter(Boolean);
+    return { conversa: f.slice(0, -3), linhas: ls.slice(-(linhas || 60)) };
+  } catch { return { erro: 'ainda não há histórico gravado' }; }
+});
+
 // atualização: a interface (pasta app/) é baixada do GitHub para a pasta do usuário, sem reinstalar
 const UPDATE_BASE = process.env.WV1_UPDATE_BASE || 'https://raw.githubusercontent.com/tiagoabepplercivil-ai/whatsapp-v1/main/';
 const BUNDLED = path.join(__dirname, 'app');
@@ -53,6 +113,8 @@ const uiDir = () => path.join(app.getPath('userData'), 'ui');
 const cmp = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; };
 const verOf = dir => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'version.json'), 'utf8')).ui || '0'; } catch { return '0'; } };
 function activeRoot() { const d = uiDir(); return fs.existsSync(path.join(d, 'index.html')) && cmp(verOf(d), verOf(BUNDLED)) > 0 ? d : BUNDLED; }
+// o leitor do WhatsApp (app/wa-reader.js) é entregue ao preload do webview a partir da pasta ativa, então o ⟳ também o atualiza
+ipcMain.on('wv1:reader-src', e => { let src = ''; for (const d of [activeRoot(), BUNDLED]) { try { src = fs.readFileSync(path.join(d, 'wa-reader.js'), 'utf8'); break; } catch {} } e.returnValue = src; });
 async function fetchJson(url) { const r = await net.fetch(url + '?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }
 ipcMain.handle('wv1:update-check', async () => {
   const current = verOf(activeRoot());
@@ -101,7 +163,7 @@ function createWindow() {
 // WhatsApp Web (webview): links fora, menu do botão direito com "Enviar para a assistente", contador de não lidas
 app.on('web-contents-created', (_, wc) => {
   wc.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
-  wc.on('will-attach-webview', (_, wp) => { wp.preload = path.join(__dirname, 'wa-preload.js'); wp.contextIsolation = true; wp.nodeIntegration = false; });
+  wc.on('will-attach-webview', (_, wp) => { wp.preload = path.join(__dirname, 'wa-preload.js'); wp.contextIsolation = true; wp.nodeIntegration = false; wp.backgroundThrottling = false; });
   if (wc.getType() !== 'webview') return;
   wc.on('will-navigate', (e, url) => { if (!/^https:\/\/web\.whatsapp\.com\//.test(url)) { e.preventDefault(); shell.openExternal(url); } });
   wc.on('page-title-updated', (_, title) => {

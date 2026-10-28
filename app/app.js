@@ -251,7 +251,7 @@ function openChat(id) {
   $('#chatName').textContent = c.name;
   $('#chatStatus').textContent = chatStatus(c);
   $('#quick').innerHTML = c.kind === 'claude'
-    ? ['📖 Ler todas as conversas', 'O que tenho hoje?', 'Minha semana', 'Meus lembretes', 'Atividades pendentes'].map(q => `<button data-quick="${esc(q)}">${esc(q)}</button>`).join('')
+    ? [DESK ? '📖 Ler todo o WhatsApp' : '📖 Ler todas as conversas', 'O que tenho hoje?', 'Minha semana', 'Meus lembretes', 'Atividades pendentes'].map(q => `<button data-quick="${esc(q)}">${esc(q)}</button>`).join('')
     : '';
   $('#attach').style.display = c.kind === 'claude' ? 'none' : '';
   $('#chat').classList.add('open'); renderMsgs(); if (!WIDE()) history.pushState({ chat: id }, '');
@@ -314,9 +314,9 @@ function renderSide() {
   if (inbox.length) {
     h += `<div class="todo-h"><b>📋 A fazer · ${inbox.length} novo(s)</b><button data-act="inbox-all">Adicionar tudo</button></div>`;
     for (const it of inbox.slice(0, 30)) {
-      const ic = it.tipo === 'compromisso' ? '📅' : it.tipo === 'lembrete' ? '🔔' : '✅';
-      h += `<div class="todo-i"><div class="tx"><div class="tt">${ic} ${esc(it.titulo)}</div>
-        <div class="ts">${it.quando ? esc(fmtDay(it.quando)) + (it.quando.length > 10 ? ', ' + fmtHour(it.quando) : '') + ' · ' : ''}💬 ${esc(it.conversa || 'WhatsApp')}</div>
+      const ic = it.tipo === 'compromisso' ? '📅' : it.tipo === 'lembrete' ? '🔔' : it.tipo === 'responder' ? '💬' : '✅';
+      h += `<div class="todo-i ${it.prioridade === 'alta' ? 'alta' : ''}"><div class="tx"><div class="tt">${it.prioridade === 'alta' ? '<span class="pri">urgente</span> ' : ''}${ic} ${esc(it.titulo)}</div>
+        <div class="ts">${it.quando ? esc(fmtDay(it.quando)) + (it.quando.length > 10 ? ', ' + fmtHour(it.quando) : '') + ' · ' : ''}${it.pessoa ? esc(it.pessoa) + ' · ' : ''}💬 ${esc(it.conversa || 'WhatsApp')}</div>
         ${it.trecho ? `<div class="tq">“${esc(it.trecho.slice(0, 140))}”</div>` : ''}</div>
         <div class="ta"><button class="ok" data-act="inbox-ok" data-id="${it.id}" title="Adicionar">✓</button><button class="no" data-act="inbox-no" data-id="${it.id}" title="Descartar">✕</button></div></div>`;
     }
@@ -324,7 +324,7 @@ function renderSide() {
     h += `<div class="todo-h"><span>${DESK && db.settings.waRead !== false ? '👁 Lendo seu WhatsApp. Nada novo a fazer.' : 'Nada novo a fazer.'}</span>${pend ? `<button data-view="tasks">${pend} pendente(s)</button>` : ''}</div>`;
   }
   $('#todo').innerHTML = h;
-  $('#sideStatus').textContent = reading || waBusy ? 'lendo mensagens…' : (DESK && db.settings.waRead !== false ? 'lendo seu WhatsApp' : 'online');
+  $('#sideStatus').textContent = waSweeping ? (waSweepFull ? 'lendo todas as conversas…' : 'abrindo as conversas não lidas…') : reading || waBusy ? 'lendo mensagens…' : (DESK && db.settings.waRead !== false ? 'lendo seu WhatsApp' : 'online');
 }
 function pushMsg(chatId, msg) {
   const c = db.chats.find(x => x.id === chatId);
@@ -343,7 +343,7 @@ async function send(text) {
   const c = db.chats.find(x => x.id === openChatId);
   const m = pushMsg(c.id, { from: 'me', text });
   $('#input').value = ''; autosize();
-  if (c.kind === 'claude') { if (/^📖|ler todas as conversas/i.test(text)) await readAll(true); else await askClaude(text); }
+  if (c.kind === 'claude') { if (/ler todo o whatsapp/i.test(text)) sweepNow(); else if (/^📖|ler todas as conversas/i.test(text)) await readAll(true); else await askClaude(text); }
   else if (c.watch) queueRead(c.id);
 }
 async function sendImage(file) {
@@ -368,8 +368,10 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { titulo: { type: 'string' }, prazo: { type: 'string', description: 'YYYY-MM-DD (opcional)' }, compromisso_id: { type: 'string' } }, required: ['titulo'] } },
   { name: 'criar_lembrete', description: 'Cria um lembrete com dia e hora: o app avisa o usuário nesse horário. Use para tudo que ele precisa lembrar de fazer ou levar.',
     input_schema: { type: 'object', properties: { titulo: { type: 'string', description: 'Frase curta e acionável, ex.: "Levar certidão de crisma na secretaria da paróquia"' }, quando: { type: 'string', description: 'YYYY-MM-DDTHH:MM' }, compromisso_id: { type: 'string' } }, required: ['titulo', 'quando'] } },
-  { name: 'buscar_conversas', description: 'Procura nas conversas e grupos do usuário (texto das mensagens e descrição/transcrição das fotos). Use para responder perguntas sobre algo que ele mandou.',
+  { name: 'buscar_conversas', description: 'Procura nas conversas e grupos do usuário (texto das mensagens e descrição/transcrição das fotos) e no histórico completo do WhatsApp guardado no Drive (sem limite de data), inclusive nos resumos diários. Use para responder perguntas sobre algo que ele mandou ou que alguém falou.',
     input_schema: { type: 'object', properties: { texto: { type: 'string', description: 'Palavras-chave (vazio = mensagens mais recentes)' }, conversa: { type: 'string', description: 'Nome da conversa (opcional)' } } } },
+  { name: 'ler_historico', description: 'Lê as últimas mensagens de uma conversa do WhatsApp no histórico completo (arquivo no Drive). Use para "o que o fulano falou", "como ficou aquilo com X", "me atualiza sobre a obra Y".',
+    input_schema: { type: 'object', properties: { conversa: { type: 'string', description: 'Nome (ou parte) da conversa ou grupo' }, linhas: { type: 'integer', description: 'Quantas linhas do fim (padrão 60)' } }, required: ['conversa'] } },
   { name: 'vincular_atividade', description: 'Vincula uma atividade existente a um compromisso existente.',
     input_schema: { type: 'object', properties: { atividade_id: { type: 'string' }, compromisso_id: { type: 'string' } }, required: ['atividade_id', 'compromisso_id'] } },
   { name: 'listar_agenda', description: 'Lista compromissos entre duas datas (inclusive) com as atividades vinculadas.',
@@ -384,7 +386,7 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } }
 ];
 
-function runTool(name, i, chatId, srcId) {
+async function runTool(name, i, chatId, srcId) {
   const origin = srcId || chatId;
   const evOut = e => ({ id: e.id, titulo: e.title, inicio: e.start, fim: e.end, local: e.location, atividades: db.tasks.filter(t => t.eventId === e.id).map(t => ({ id: t.id, titulo: t.title, concluida: t.done })) });
   switch (name) {
@@ -413,8 +415,23 @@ function runTool(name, i, chatId, srcId) {
           out.push({ conversa: c.name, data: m.ts.slice(0, 16), texto: m.text || '', foto: m.img ? (m.desc || 'foto sem descrição') : undefined });
         }
       }
-      return out.slice(-30);
+      for (const m of db.waLog) {
+        const hay = (m.text + ' ' + m.who).toLowerCase();
+        if ((cn && !m.chat.toLowerCase().includes(cn)) || (q.length && !q.some(w => hay.includes(w)))) continue;
+        out.push({ conversa: m.chat + ' (WhatsApp)', data: m.when, de: m.who, texto: m.text });
+      }
+      if (DESK && window.wv1desk.logSearch) { // histórico completo no Drive (além dos 30 dias guardados no app)
+        try {
+          for (const h of await window.wv1desk.logSearch({ texto: i.texto || '', conversa: i.conversa || '', limite: 30 })) {
+            const body = h.texto.replace(/^\d{2}:\d{2} [^:]*: /, '').slice(0, 120);
+            if (!out.some(o => (o.texto || '').slice(0, 120) === body)) out.push({ conversa: h.origem, data: h.data, texto: h.texto });
+          }
+        } catch {}
+      }
+      out.sort((a, b) => a.data.localeCompare(b.data));
+      return out.slice(-40);
     }
+    case 'ler_historico': return DESK ? await window.wv1desk.logRead({ conversa: i.conversa || '', linhas: i.linhas }) : { erro: 'histórico só no app do computador' };
     case 'registrar_descricao': {
       for (const c of db.chats) { const m = c.messages.find(x => x.id === i.mensagem_id); if (m) { m.desc = i.descricao; save(); return { ok: true }; } }
       return { erro: 'mensagem não encontrada' };
@@ -437,6 +454,9 @@ function runTool(name, i, chatId, srcId) {
   return { erro: 'ferramenta desconhecida' };
 }
 
+// resumos dos últimos dias (arquivos em Resumos/ no Drive) ficam sempre no contexto da assistente
+let recentSums = '';
+async function refreshSums() { if (!DESK || !window.wv1desk.summaryRecent) return; try { recentSums = (await window.wv1desk.summaryRecent({ dias: 3, max: 3500 })) || ''; } catch {} }
 function systemPrompt() {
   const now = new Date();
   const up = sortedEvents().filter(e => e.start >= localISO(now).slice(0, 10)).slice(0, 15).map(e => `- [${e.id}] ${e.start} ${e.title}${e.location ? ' @ ' + e.location : ''}`).join('\n') || '(nenhum)';
@@ -444,6 +464,11 @@ function systemPrompt() {
   const pendTasks = db.tasks.filter(t => !t.done);
   return `Você é a assistente pessoal (Claude) dentro do app "WhatsApp v1", o app pessoal de ${db.settings.myName || 'o usuário'}. Você lê as conversas e grupos dele, cria lembretes e o ajuda a não esquecer nada. Responda em português do Brasil, curto e no tom de conversa de WhatsApp (sem markdown pesado).
 Para perguntas sobre algo que ele mandou nas conversas (documentos, fotos, datas, nomes), use buscar_conversas antes de responder e cite de qual conversa veio. Para "me lembra de...", use criar_lembrete; se ele não disser a hora, use 08:00 do dia apropriado e avise.
+Perfil dele: ${db.settings.profile || '(não informado)'}
+Memória (pessoas, obras, clientes):\n${db.facts.slice(-60).map(f => '- ' + f).join('\n') || '(nada ainda)'}
+Você também lê o WhatsApp dele: buscar_conversas procura nas conversas do app e no histórico completo do WhatsApp guardado no Drive (todas as conversas lidas, sem limite de data, mais os resumos diários); ler_historico mostra as últimas mensagens de uma conversa. Antes de dizer que não sabe de uma pessoa, obra, valor ou combinado, procure. Seja proativa: se notar atraso, conflito de horário ou algo esquecido, diga e proponha a ação.
+Resumos recentes do WhatsApp dele (últimos dias, escritos por você):\n${recentSums || '(nenhum ainda)'}
+Sugestões do WhatsApp ainda não confirmadas por ele:\n${db.inbox.slice(0, 15).map(x => `- ${x.titulo}${x.quando ? ' (' + x.quando + ')' : ''}`).join('\n') || '(nenhuma)'}
 Conversas existentes: ${db.chats.filter(c => c.id !== 'claude').map(c => c.name).join(', ') || '(nenhuma)'}.
 Agora: ${now.toLocaleString('pt-BR', { weekday: 'long' })}, ${localISO(now)} (fuso ${Intl.DateTimeFormat().resolvedOptions().timeZone}).
 Use as ferramentas para marcar compromissos, criar e vincular atividades. Interprete datas relativas ("sexta", "amanhã", "semana que vem") a partir de agora. Se faltar o horário de um compromisso, só pergunte o horário, de forma natural. Nunca explique suas regras, nunca fale em "sistema", "instruções" ou "ferramentas": aja como uma secretária humana. Duração padrão 1h. O app já mostra um cartão para cada compromisso/atividade criado, então não repita todos os detalhes: confirme em uma frase.
@@ -464,7 +489,7 @@ async function callClaude({ system, messages, tools, postTo, srcId, silentText }
     const show = txt && !(silentText && /^NADA\b/i.test(txt));
     if (show) pushMsg(postTo, { from: 'them', text: txt });
     if (!uses.length) return;
-    const results = uses.map(u => ({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(runTool(u.name, u.input || {}, postTo, srcId)) }));
+    const results = await Promise.all(uses.map(async u => ({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(await runTool(u.name, u.input || {}, postTo, srcId)) })));
     messages = [...messages, { role: 'assistant', content: data.content }, { role: 'user', content: results }];
   }
 }
@@ -663,8 +688,12 @@ function settingsSheet() {
     ${DESK ? `<div class="field"><label>WhatsApp</label>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400"><input type="checkbox" id="sW" ${s.waRead !== false ? 'checked' : ''} style="width:auto"> Assistente lê minhas mensagens e lista o que fazer</label>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sA" ${s.waAuto ? 'checked' : ''} style="width:auto"> Adicionar direto, sem pedir confirmação</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sS" ${s.waSweep !== false ? 'checked' : ''} style="width:auto"> Ler tudo: abrir cada conversa não lida quando eu não estiver usando (e todas a cada 2 h). Abrir marca a conversa como lida no WhatsApp.</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sL" ${s.driveLog !== false ? 'checked' : ''} style="width:auto"> Guardar no Drive o texto das conversas lidas e os resumos do dia (WhatsApp v1/Conversas e Resumos)</label>
       <input id="sI" value="${esc(s.waIgnore || '')}" placeholder="Ignorar conversas (nomes separados por vírgula)" style="margin-top:6px">
-      <div class="hint">Lê as mensagens novas da conversa aberta e as prévias das não lidas, em lotes. O texto vai para a Anthropic para análise (custo por uso da sua chave).</div></div>` : ''}
+      <div class="hint">Abrir a conversa marca como lida no WhatsApp (e manda o visto azul, se ativo). O texto vai para a Anthropic para análise (custo por uso da sua chave).</div></div>
+    <div class="field"><label>Sobre você e seu trabalho</label><textarea id="sP" rows="3">${esc(s.profile || '')}</textarea><div class="hint">Ajuda a assistente a entender o que é com você nas mensagens.</div></div>
+    <div class="field"><label>Memória da assistente (${db.facts.length})</label><textarea id="sF" rows="4" placeholder="Uma linha por fato. Ela acrescenta sozinha o que aprende nas conversas.">${esc(db.facts.join('\n'))}</textarea></div>` : ''}
     ${DESK ? `<div class="field"><label>📁 Pasta dos arquivos (Google Drive)</label>
       <div style="font-size:14px;word-break:break-all">${esc(driveInfo?.base || '…')}</div>
       <div class="hint">${driveInfo?.detected ? 'Google Drive encontrado: fotos das conversas que você abre e documentos que você baixa no WhatsApp vão para cá, separados por conversa, e o Drive sincroniza sozinho.' : '⚠️ Não achei o Google Drive no PC. Instale o "Google Drive para computador" (google.com/drive/download) e reabra o app, ou escolha a pasta. Enquanto isso salvo em Documentos.'}</div>
@@ -710,7 +739,7 @@ document.addEventListener('click', async e => {
   if (!el) return;
   const d = el.dataset;
   if (d.tab) { tab = d.tab; render(); return; }
-  if (d.view) { tab = d.view; db.meta.view = tab; save(); render(); return; }
+  if (d.view) { const was = tab; tab = d.view; db.meta.view = tab; save(); render(); if (was === 'wa' && tab !== 'wa' && db.settings.waSweep !== false) setTimeout(() => { if (tab !== 'wa') requestSweep({ full: false, force: true }); }, 3000); if (tab === 'wa' && waSweeping && !manualSweep) requestSweep({ cancel: true }); return; }
   if (d.cfilter) { chatFilter = d.cfilter; render(); return; }
   if (d.opencal !== undefined) { openCal(true); return; }
   if (d.chat) { openChat(d.chat); return; }
@@ -768,7 +797,7 @@ document.addEventListener('click', async e => {
     }
     case 'del-task': db.tasks = db.tasks.filter(x => x.id !== id); save(); closeSheet(); render(); if (openChatId) renderMsgs(); break;
     case 'save-settings':
-      if ($('#sW')) { db.settings.waRead = $('#sW').checked; db.settings.waAuto = $('#sA').checked; db.settings.waIgnore = $('#sI').value.trim(); }
+      if ($('#sW')) { db.settings.waRead = $('#sW').checked; db.settings.waAuto = $('#sA').checked; db.settings.waSweep = $('#sS').checked; db.settings.driveLog = $('#sL').checked; db.settings.waIgnore = $('#sI').value.trim(); db.settings.profile = $('#sP').value.trim(); db.facts = $('#sF').value.split('\n').map(x => x.trim()).filter(Boolean); }
       db.settings.myName = $('#sN').value.trim(); db.settings.apiKey = $('#sK').value.trim(); db.settings.model = $('#sM').value.trim() || 'claude-sonnet-5-5';
       save(); closeSheet(); render(); if (openChatId) openChat(openChatId); toast('Salvo'); break;
     case 'export': {
@@ -830,7 +859,12 @@ async function sendSide() {
   const t = $('#sideInput').value.trim(); if (!t) return;
   $('#sideInput').value = '';
   pushMsg('claude', { from: 'me', text: t });
-  if (/^📖|ler todas as conversas/i.test(t)) await readAll(true); else await askClaude(t);
+  if (/ler todo o whatsapp/i.test(t)) sweepNow(); else if (/^📖|ler todas as conversas/i.test(t)) await readAll(true); else await askClaude(t);
+}
+function sweepNow() {
+  if (!DESK) return;
+  manualSweep = true; pushMsg('claude', { from: 'them', text: 'Vou abrir todas as conversas para ler. Se você mexer no WhatsApp eu paro e volto onde estava.' });
+  requestSweep({ full: true, force: true });
 }
 $('#fab').addEventListener('click', () => { if (tab === 'chats') newChatSheet(); else if (tab === 'agenda') eventForm({}); else taskForm({}); });
 $('#btnSettings').addEventListener('click', settingsSheet);
@@ -865,8 +899,20 @@ if (DESK) {
 }
 
 // ---------- leitura automática do WhatsApp → lista "A fazer" ----------
-db.inbox = db.inbox || []; db.meta.waSeen = db.meta.waSeen || [];
-const waSeen = new Set(db.meta.waSeen); let waQueue = [], waTimer = null, waBusy = false;
+db.inbox = db.inbox || []; db.meta.waSeen = db.meta.waSeen || []; db.waLog = db.waLog || []; db.facts = db.facts || [];
+if (db.settings.profile === undefined) db.settings.profile = 'Engenheiro civil em Joinville/SC. Trojan Engenharia (projetos, controle tecnológico de pavimentação, investigação geotécnica, supervisão de contratos públicos) e Grupo NEV (sócio da NEV Geotecnia; sócio: Alex Rafael Niepiçuy).';
+const waCtx = {}; db.waLog.slice(-600).forEach(m => { (waCtx[m.chat] = waCtx[m.chat] || []).push(m); });
+let waSweeping = false, waSweepFull = false, manualSweep = false, waWv = null;
+function requestSweep(o) { try { waWv && waWv.send('wa-sweep', o || {}); } catch {} }
+// varredura automática: não lidas a cada 10 min, todas as conversas a cada 2 h (o leitor só executa se o WhatsApp estiver parado)
+let lastSweepU = Date.now() - 7 * 60e3, lastSweepF = Date.now() - 105 * 60e3;
+function scheduleSweeps() {
+  if (!DESK || !waWv || waSweeping || db.settings.waSweep === false || db.settings.waRead === false) return;
+  const n = Date.now();
+  if (n - lastSweepF > 2 * 3600e3) { lastSweepF = lastSweepU = n; requestSweep({ full: true }); }
+  else if (n - lastSweepU > 10 * 60e3) { lastSweepU = n; requestSweep({ full: false }); }
+}
+const waSeen = new Set(db.meta.waSeen), prevSeen = new Set(); let waQueue = [], waTimer = null, waBusy = false;
 function waTs(meta) { // "[14:17, 28/10/2026] Nome: "
   const m = (meta || '').match(/\[(\d{1,2}):(\d{2}),\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\]\s*([^:]*):?/);
   return m ? { d: new Date(+m[5], +m[4] - 1, +m[3], +m[1], +m[2]), who: m[6].trim() } : { d: new Date(), who: '' };
@@ -874,25 +920,38 @@ function waTs(meta) { // "[14:17, 28/10/2026] Nome: "
 function ingestWa(batches) {
   if (db.settings.waRead === false) return;
   const ign = (db.settings.waIgnore || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
-  const cutoff = Date.now() - 36 * 3600e3;
+  const cutoff = Date.now() - 36 * 3600e3, toLog = {};
   for (const b of batches || []) {
     if (!b.chat || ign.some(x => b.chat.toLowerCase().includes(x))) { (b.msgs || []).forEach(m => waSeen.add(m.id)); continue; }
     for (const m of b.msgs || []) {
       if (waSeen.has(m.id)) continue; waSeen.add(m.id);
       const t = waTs(m.meta);
-      if (t.d.getTime() < cutoff || !m.text || m.text.length < 3) continue;
-      waQueue.push({ chat: b.chat, who: m.out ? 'Eu' : (t.who || b.chat), when: localISO(t.d), text: m.text.slice(0, 800) });
+      if (!m.text || m.text.length < 2) continue;
+      const rec = { chat: b.chat, who: m.out ? 'Eu' : (t.who || m.who || b.chat), when: localISO(t.d), text: m.text.slice(0, 800) };
+      const isPrev = m.id.startsWith('p:'), pk = b.chat + '|' + rec.text; // prévia da lista (sem hora/autor) vs. mensagem real
+      if (isPrev) { rec.prev = 1; prevSeen.add(pk); }
+      else if (DESK && db.settings.driveLog !== false) (toLog[b.chat] = toLog[b.chat] || []).push(rec); // histórico completo no Drive
+      if (t.d.getTime() < Date.now() - 30 * 864e5) continue;
+      let dup = false; // a mensagem real substitui a prévia já guardada (e não vai de novo para a assistente)
+      if (!isPrev && prevSeen.has(pk)) { dup = true; prevSeen.delete(pk); const k = db.waLog.findIndex(x => x.prev && x.chat === rec.chat && x.text === rec.text); if (k >= 0) db.waLog.splice(k, 1); if (waCtx[b.chat]) waCtx[b.chat] = waCtx[b.chat].filter(x => !(x.prev && x.text === rec.text)); }
+      db.waLog.push(rec); (waCtx[b.chat] = waCtx[b.chat] || []).push(rec); if (waCtx[b.chat].length > 40) waCtx[b.chat].splice(0, waCtx[b.chat].length - 40);
+      if (dup || t.d.getTime() < cutoff || m.text.length < 3) continue;
+      waQueue.push(rec);
     }
   }
-  db.meta.waSeen = [...waSeen].slice(-4000); save();
+  db.meta.waSeen = [...waSeen].slice(-6000); if (db.waLog.length > 2000) db.waLog.splice(0, db.waLog.length - 2000); save();
+  for (const [chat, lines] of Object.entries(toLog)) window.wv1desk.logAppend({ chat, lines: lines.sort((a, b) => a.when.localeCompare(b.when)) }).catch(() => {});
   if (waQueue.length) { clearTimeout(waTimer); waTimer = setTimeout(flushWa, waQueue.length >= 25 ? 2000 : 45000); }
 }
 function addInbox(it) {
   const key = (it.titulo || '').toLowerCase();
   if (!key || db.inbox.some(x => x.titulo.toLowerCase() === key) || db.tasks.some(t => !t.done && t.title.toLowerCase() === key)) return;
-  const item = { id: uid(), tipo: it.tipo || 'atividade', titulo: it.titulo, quando: (it.quando || '').slice(0, 16), conversa: it.conversa || '', trecho: it.trecho || '', ts: new Date().toISOString() };
+  let quando = (it.quando || '').slice(0, 16), titulo = it.titulo;
+  if (it.tipo === 'responder') { if (!/^respond/i.test(titulo)) titulo = 'Responder ' + (it.pessoa || it.conversa || '') + ': ' + titulo; if (quando.length < 16) quando = localISO(new Date(Date.now() + 2 * 3600e3)); }
+  const item = { id: uid(), tipo: it.tipo || 'atividade', titulo, quando, conversa: it.conversa || '', pessoa: it.pessoa || '', prioridade: it.prioridade || 'media', motivo: it.motivo || '', trecho: it.trecho || '', ts: new Date().toISOString() };
   db.inbox.unshift(item);
   if (db.settings.waAuto) acceptInbox(item.id, true);
+  return item;
 }
 function acceptInbox(id, quiet) {
   const it = db.inbox.find(x => x.id === id); if (!it) return;
@@ -902,7 +961,7 @@ function acceptInbox(id, quiet) {
     const ev = addEvent({ title: it.titulo, start: it.quando, notes, chatId: 'claude' });
     pushMsg('claude', { from: 'them', card: { type: 'event', id: ev.id } });
   } else {
-    const remindAt = it.tipo === 'lembrete' || it.quando.length > 10 ? (it.quando.length > 10 ? it.quando : (it.quando ? it.quando + 'T08:00' : '')) : '';
+    const remindAt = it.tipo === 'lembrete' || it.tipo === 'responder' || it.quando.length > 10 ? (it.quando.length > 10 ? it.quando : (it.quando ? it.quando + 'T08:00' : '')) : '';
     const t = addTask({ title: it.titulo, due: it.quando.slice(0, 10), remindAt, chatId: 'claude' });
     pushMsg('claude', { from: 'them', card: { type: 'task', id: t.id, remind: !!remindAt } });
   }
@@ -916,22 +975,56 @@ async function flushWa() {
     if (!db.settings.apiKey) {
       for (const m of batch) { const p = parseBasic(m.text); if (p.date && p.hh !== null) { p.date.setHours(p.hh, p.mm, 0, 0); addInbox({ tipo: 'compromisso', titulo: p.title || m.text.slice(0, 60), quando: localISO(p.date), conversa: m.chat, trecho: m.text }); } }
     } else {
-      const txt = batch.map(m => `[${m.chat}] ${m.when} ${m.who}: ${m.text}`).join('\n');
-      const pend = db.tasks.filter(t => !t.done).slice(0, 30).map(t => '- ' + t.title).join('\n') + db.inbox.map(x => '\n- ' + x.titulo).join('');
+      const byChat = {}; batch.forEach(m => (byChat[m.chat] = byChat[m.chat] || []).push(m));
+      const txt = Object.entries(byChat).map(([chat, ms]) => {
+        const ctx = (waCtx[chat] || []).filter(m => !ms.includes(m)).slice(-10);
+        return `### Conversa: ${chat}\n` + (ctx.length ? 'Contexto anterior (já visto):\n' + ctx.map(m => `- ${m.when.slice(5, 16)} ${m.who}: ${m.text.slice(0, 200)}`).join('\n') + '\n' : '') + 'Mensagens novas:\n' + ms.map(m => `- ${m.when} ${m.who}: ${m.text}`).join('\n');
+      }).join('\n\n');
+      const pend = db.tasks.filter(t => !t.done).slice(0, 40).map(t => `- [${t.id}] ${t.title}${t.remindAt ? ' (' + t.remindAt + ')' : t.due ? ' (' + t.due + ')' : ''}`).join('\n');
+      const sug = db.inbox.map(x => '- ' + x.titulo).join('\n');
+      const now = new Date();
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': db.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
         body: JSON.stringify({ model: db.settings.model || 'claude-sonnet-5-5', max_tokens: 1500,
-          system: `Você é a secretária de ${db.settings.myName || 'o usuário'} (engenheiro). Lê mensagens novas do WhatsApp dele e extrai SÓ o que ele precisa fazer, lembrar ou comparecer: pedidos feitos a ele, prazos, entregas, pagamentos, reuniões/visitas com data, e o que ele mesmo prometeu ("Eu: vou mandar amanhã"). Ignore conversa social, propaganda, figurinhas, avisos genéricos de grupo e o que não exige ação dele. Agora: ${localISO(new Date())} (${new Date().toLocaleDateString('pt-BR', { weekday: 'long' })}). Datas relativas a partir da hora da mensagem. Não repita itens já existentes:\n${pend || '(nenhum)'}\nSe não houver nada, chame a ferramenta com lista vazia.`,
-          tools: [{ name: 'itens_a_fazer', description: 'Lista de itens extraídos', input_schema: { type: 'object', properties: { itens: { type: 'array', items: { type: 'object', properties: {
-            tipo: { type: 'string', enum: ['compromisso', 'lembrete', 'atividade'] }, titulo: { type: 'string', description: 'Ação curta, ex.: "Enviar laudo SPT ao Alex"' },
-            quando: { type: 'string', description: 'YYYY-MM-DDTHH:MM ou YYYY-MM-DD; vazio se não houver' }, conversa: { type: 'string' }, trecho: { type: 'string', description: 'Trecho da mensagem que originou' } }, required: ['tipo', 'titulo', 'conversa'] } } }, required: ['itens'] } }],
+          system: `Você é a secretária executiva de ${db.settings.myName || 'o usuário'}. Perfil dele: ${db.settings.profile || '(não informado)'}
+O que você já sabe (memória):\n${db.facts.slice(-60).map(f => '- ' + f).join('\n') || '(nada ainda)'}
+Você lê as mensagens novas do WhatsApp dele ("Eu" = ele) e age como uma secretária atenta e proativa:
+1) Extraia TUDO que exige ação dele ou que ele precisa lembrar: pedidos feitos a ele, perguntas dirigidas a ele ainda sem resposta (tipo "responder"), prazos, entregas, pagamentos, cobranças, documentos a enviar, reuniões/visitas/vistorias com data, e promessas que ele mesmo fez ("Eu: mando amanhã").
+2) Dê baixa no que já foi feito: se as mensagens mostram que ele já cumpriu algo dos pendentes (ex.: "Eu: enviado", "Eu: já paguei"), liste o id em "concluidas".
+3) Aprenda: fatos úteis e duradouros sobre pessoas, obras, clientes e empresas (quem é quem, papéis, locais, prazos de contrato) vão em "fatos", uma frase curta cada, só se forem novos. Nada de saúde, política, fofoca ou dados sensíveis.
+4) Resuma: para cada conversa com novidade de trabalho (decisão, pedido, número, prazo, combinado), 1 a 3 frases objetivas em "resumos", mesmo sem ação para ele. Conversa só social não entra.
+Ignore conversa social, figurinhas, propaganda, correntes, avisos genéricos de grupo e o que não é com ele. Em grupos grandes, só o que o menciona ou cabe ao papel dele.
+Prioridade: alta = prazo em até 24h, cliente ou órgão público cobrando, dinheiro, ou pergunta a ele sem resposta há mais de 2h; media = prazo nesta semana; baixa = o resto.
+Agora: ${localISO(now)} (${now.toLocaleDateString('pt-BR', { weekday: 'long' })}). Datas relativas contam a partir da hora de cada mensagem; sem hora, use só a data.
+Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '(nenhum)'}\nSugestões ainda não confirmadas (não repita):\n${sug || '(nenhuma)'}\nSe não houver nada novo, chame a ferramenta com listas vazias.`,
+          tools: [{ name: 'itens_a_fazer', description: 'Resultado da leitura', input_schema: { type: 'object', properties: {
+            itens: { type: 'array', items: { type: 'object', properties: {
+              tipo: { type: 'string', enum: ['compromisso', 'lembrete', 'atividade', 'responder'] }, titulo: { type: 'string', description: 'Ação curta e concreta, ex.: "Enviar laudo SPT ao Alex"; para responder: "Responder Alex: data da vistoria"' },
+              quando: { type: 'string', description: 'YYYY-MM-DDTHH:MM ou YYYY-MM-DD; vazio se não houver' }, conversa: { type: 'string' }, pessoa: { type: 'string', description: 'Quem pediu/perguntou' },
+              prioridade: { type: 'string', enum: ['alta', 'media', 'baixa'] }, trecho: { type: 'string', description: 'Trecho da mensagem que originou' }, motivo: { type: 'string', description: 'Uma linha: por que isso importa' } }, required: ['tipo', 'titulo', 'conversa', 'prioridade'] } },
+            concluidas: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, motivo: { type: 'string' } }, required: ['id'] } },
+            fatos: { type: 'array', items: { type: 'string' } },
+            resumos: { type: 'array', items: { type: 'object', properties: { conversa: { type: 'string' }, resumo: { type: 'string' } }, required: ['conversa', 'resumo'] } } }, required: ['itens'] } }],
           tool_choice: { type: 'tool', name: 'itens_a_fazer' },
           messages: [{ role: 'user', content: txt }] })
       });
       const data = await r.json(); if (!r.ok) throw new Error(data?.error?.message || ('HTTP ' + r.status));
-      const use = data.content.find(b => b.type === 'tool_use');
-      (use?.input?.itens || []).forEach(addInbox);
+      const use = data.content.find(b => b.type === 'tool_use'), out = use?.input || {};
+      const novos = (out.itens || []).map(addInbox).filter(Boolean);
+      const baixas = [];
+      for (const c of out.concluidas || []) { const t = db.tasks.find(x => x.id === c.id && !x.done); if (t) { t.done = true; baixas.push(t.title + (c.motivo ? ' (' + c.motivo + ')' : '')); } }
+      for (const f of out.fatos || []) { const k = String(f).trim(); if (k && k.length < 200 && !db.facts.some(x => x.toLowerCase() === k.toLowerCase())) db.facts.push(k); }
+      if (db.facts.length > 80) db.facts.splice(0, db.facts.length - 80);
+      const sums = (out.resumos || []).filter(r => r && r.conversa && r.resumo).map(r => `### ${fmtHour(localISO(now))} — ${r.conversa}\n${String(r.resumo).trim()}`);
+      if (sums.length && DESK && db.settings.driveLog !== false) window.wv1desk.summaryAppend({ date: ymd(now), text: sums.join('\n\n') }).then(refreshSums).catch(() => {});
+      // proativa: conta o que anotou e avisa na hora o que é urgente
+      const lines = [];
+      if (novos.length && !db.settings.waAuto) lines.push('📥 Do WhatsApp anotei (confira na lista acima):\n' + novos.map(n => `• ${n.prioridade === 'alta' ? '🔴 ' : ''}${n.titulo}${n.pessoa ? ' — ' + n.pessoa : ''}`).join('\n'));
+      if (baixas.length) lines.push('✅ Dei baixa: ' + baixas.join('; '));
+      if (lines.length) pushMsg('claude', { from: 'them', text: lines.join('\n\n') });
+      const soon = localISO(new Date(Date.now() + 3 * 3600e3));
+      novos.filter(n => n.prioridade === 'alta' || (n.quando.length > 10 && n.quando <= soon)).slice(0, 3).forEach(n => notify('📌 ' + n.titulo, (n.pessoa ? n.pessoa + ' · ' : '') + n.conversa));
     }
     save();
   } catch (e) { console.warn('leitura do WhatsApp:', e.message); waQueue.unshift(...batch.slice(0, 30)); waTimer = setTimeout(flushWa, 120000); }
@@ -954,9 +1047,24 @@ if (DESK) {
   wv.setAttribute('useragent', WA_UA);
   $('#waPane').appendChild(wv);
   window.wv1desk.onWaUnread(n => { waUnread = n; setBadge($('#waBadge'), n); });
-  window.wv1desk.driveSet(db.settings.driveDir || '').then(r => { driveInfo = r; });
+  window.wv1desk.driveSet(db.settings.driveDir || '').then(r => { driveInfo = r; refreshSums(); });
+  setInterval(refreshSums, 10 * 60e3);
   window.wv1desk.onSaved(d => { db.meta.savedCount = (db.meta.savedCount || 0) + 1; save(); toast('📁 Salvo: ' + d.rel); });
-  wv.addEventListener('ipc-message', e => { if (e.channel === 'wa-msgs') ingestWa(e.args[0]); });
+  waWv = wv;
+  wv.addEventListener('ipc-message', e => {
+    if (e.channel === 'wa-msgs') ingestWa(e.args[0]);
+    if (e.channel === 'wa-sweep') {
+      const st = e.args[0] || {}; waSweeping = st.state === 'start'; waSweepFull = !!st.full; renderSide();
+      if (st.state === 'skip') { // WhatsApp em uso ou carregando: tenta de novo em ~2 min
+        lastSweepU = Date.now() - 8 * 60e3; if (st.full) lastSweepF = Date.now() - 118 * 60e3;
+        if (manualSweep) { manualSweep = false; pushMsg('claude', { from: 'them', text: st.reason === 'carregando' ? 'O WhatsApp ainda está carregando. Tento de novo daqui a pouco.' : 'Você está usando o WhatsApp agora; faço a leitura completa assim que ele ficar parado.' }); }
+      }
+      if (st.state === 'end') {
+        if (st.full) db.meta.lastFullSweep = new Date().toISOString(); db.meta.lastSweep = new Date().toISOString(); save();
+        if (manualSweep) { manualSweep = false; pushMsg('claude', { from: 'them', text: st.aborted ? `Parei porque você mexeu no WhatsApp. Li ${st.opened} conversa(s); continuo depois.` : st.opened ? `Li ${st.opened} conversa(s). O que precisar de ação aparece na lista acima em instantes.` : 'Não consegui abrir as conversas agora (o WhatsApp ainda carregando?). Tento de novo daqui a pouco.' }); }
+      }
+    }
+  });
   window.wv1desk.onToAssistant(async d => {
     const c = fromWaChat();
     let img;
@@ -997,23 +1105,37 @@ function tick() {
     }
   }
   const today = ymd(new Date());
-  if (db.meta.digest !== today && new Date().getHours() >= 6) {
-    db.meta.digest = today; changed = true;
-    const evs = sortedEvents().filter(e => e.start.slice(0, 10) === today);
-    const rem = db.tasks.filter(t => !t.done && t.remindAt && t.remindAt.slice(0, 10) === today);
-    const late = db.tasks.filter(t => !t.done && ((t.remindAt && t.remindAt.slice(0, 10) < today) || (!t.remindAt && t.due && t.due < today)));
-    const pend = db.tasks.filter(t => !t.done).length;
-    const lines = [`☀️ Bom dia${db.settings.myName ? ', ' + db.settings.myName : ''}! Seu dia:`];
-    lines.push(evs.length ? evs.map(e => `📅 ${fmtHour(e.start)} ${e.title}`).join('\n') : '📅 Nenhum compromisso hoje.');
-    if (rem.length) lines.push(rem.map(t => `🔔 ${fmtHour(t.remindAt)} ${t.title}`).join('\n'));
-    if (late.length) lines.push(`⚠️ Atrasados: ${late.map(t => t.title).join('; ')}`);
-    lines.push(`✅ ${pend} atividade(s) pendente(s).`);
-    pushMsg('claude', { from: 'them', text: lines.join('\n\n') });
-  }
+  const hr = new Date().getHours();
+  if (db.meta.digest !== today && hr >= 6) { db.meta.digest = today; changed = true; briefing('manha'); }
+  if (db.meta.digestPm !== today && hr >= 18) { db.meta.digestPm = today; changed = true; briefing('tarde'); }
   if (changed) { save(); render(); }
+  scheduleSweeps();
+}
+function briefData(kind) {
+  const today = ymd(new Date()), tm = new Date(); tm.setDate(tm.getDate() + 1); const tomorrow = ymd(tm);
+  const day = kind === 'manha' ? today : tomorrow;
+  const evs = sortedEvents().filter(e => e.start.slice(0, 10) === day);
+  const rem = db.tasks.filter(t => !t.done && t.remindAt && t.remindAt.slice(0, 10) === day);
+  const late = db.tasks.filter(t => !t.done && ((t.remindAt && t.remindAt < localISO(new Date())) || (!t.remindAt && t.due && t.due < today)));
+  const pend = db.tasks.filter(t => !t.done);
+  const lines = [kind === 'manha' ? `☀️ Bom dia${db.settings.myName ? ', ' + db.settings.myName : ''}! Seu dia:` : `🌙 Fechando o dia. Amanhã:`];
+  lines.push(evs.length ? evs.map(e => `📅 ${fmtHour(e.start)} ${e.title}${e.location ? ' — ' + e.location : ''}`).join('\n') : (kind === 'manha' ? '📅 Nenhum compromisso hoje.' : '📅 Nenhum compromisso amanhã.'));
+  if (rem.length) lines.push(rem.map(t => `🔔 ${fmtHour(t.remindAt)} ${t.title}`).join('\n'));
+  if (late.length) lines.push(`⚠️ Atrasados: ${late.slice(0, 8).map(t => t.title).join('; ')}`);
+  if (db.inbox.length) lines.push(`📋 ${db.inbox.length} sugestão(ões) do WhatsApp esperando sua confirmação${db.inbox.some(x => x.prioridade === 'alta') ? ', com urgência' : ''}.`);
+  lines.push(`✅ ${pend.length} atividade(s) pendente(s).`);
+  return lines.join('\n\n');
+}
+async function briefing(kind) {
+  const text = briefData(kind);
+  if (!db.settings.apiKey) { pushMsg('claude', { from: 'them', text }); return; }
+  try {
+    await callClaude({ system: systemPrompt() + `\nVocê está escrevendo, por iniciativa própria, o briefing ${kind === 'manha' ? 'da manhã' : 'do fim do dia'}.`, tools: TOOLS, postTo: 'claude',
+      messages: [{ role: 'user', content: `[briefing automático, não é mensagem do usuário] Dados:\n${text}\n\nEscreva o briefing ${kind === 'manha' ? 'da manhã' : 'do fim do dia: o que ficou pendente e o que vem amanhã'} como secretária: curto, em tópicos com emojis, e no máximo 2 sugestões práticas (cobrar alguém, remarcar, mandar um documento). Se algo atrasado merecer lembrete, crie com criar_lembrete. Sem cumprimento longo.` }] });
+  } catch { pushMsg('claude', { from: 'them', text }); }
 }
 setInterval(tick, 30e3);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); if (db.settings.apiKey) readAll(false); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); if (db.settings.apiKey) readAll(false); } else if (db.settings.waSweep !== false) setTimeout(() => { if (document.hidden) requestSweep({ full: false, force: true }); }, 20000); });
 
 // instalação
 let deferredPrompt;

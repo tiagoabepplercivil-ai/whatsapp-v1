@@ -9,5 +9,10 @@ contextBridge.exposeInMainWorld('wv1desk', {
   drivePick: () => ipcRenderer.invoke('wv1:drive-pick'),
   driveOpen: () => ipcRenderer.invoke('wv1:drive-open'),
   saveFile: d => ipcRenderer.invoke('wv1:save-file', d),
-  onSaved: cb => ipcRenderer.on('wv1:saved', (_, d) => cb(d))
+  onSaved: cb => ipcRenderer.on('wv1:saved', (_, d) => cb(d)),
+  logAppend: d => ipcRenderer.invoke('wv1:log-append', d),
+  summaryAppend: d => ipcRenderer.invoke('wv1:summary-append', d),
+  logSearch: d => ipcRenderer.invoke('wv1:log-search', d),
+  logRead: d => ipcRenderer.invoke('wv1:log-read', d),
+  summaryRecent: d => ipcRenderer.invoke('wv1:summary-recent', d)
 });
