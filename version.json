@@ -1,7 +1,7 @@
 {
-  "ui": "1.8.3",
-  "desktop": "1.8.2",
-  "notes": "Nada sai da lista sem você confirmar (\"Isso foi feito?\"). Avisos na véspera e 1 hora antes de atividades e compromissos. No alto do painel: agenda e atividades em ordem de horário.",
+  "ui": "1.8.4",
+  "desktop": "1.8.4",
+  "notes": "Áudios do WhatsApp viram texto e passam pela triagem (chave da Groq em Configurações). Resumo da semana por obra toda sexta às 17 h, salvo no Drive.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",
@@ -15,5 +15,5 @@
     "icons/tray.png"
   ],
   "installerUrl": "https://raw.githubusercontent.com/tiagoabepplercivil-ai/whatsapp-v1/installer/WhatsApp-v1-Instalador.exe",
-  "sha256": "528edd317a6f78ce58bcefc79b8de9322712182e108d451883ab38f91de0d7de"
+  "sha256": "aa4c887cb8775b78d1f5ddd7199327b36bdce3456e616a538bd8763cccd46acd"
 }

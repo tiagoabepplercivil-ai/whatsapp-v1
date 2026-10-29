@@ -173,6 +173,8 @@ function renderChats() {
   return h + '<div style="height:90px"></div>';
 }
 function cardTitle(card) {
+  if (card.type === 'aud') return '🎤 Áudio · ' + (card.chat || '');
+  if (card.type === 'week') return '📊 Resumo da semana';
   if (card.type === 'done?') return (card.status === 'pendente' || !card.status ? 'Isso foi feito? ' : '') + (db.tasks.find(t => t.id === card.id)?.title || '');
   if (card.type === 'sug') return (card.status === 'pendente' || !card.status ? 'Colocar como tarefa? ' : '') + card.titulo;
   if (card.type === 'plan') return 'Plano: ' + (db.plans.find(p => p.id === card.id)?.titulo || '');
@@ -258,7 +260,7 @@ function openChat(id) {
   $('#chatName').textContent = c.name;
   $('#chatStatus').textContent = chatStatus(c);
   $('#quick').innerHTML = c.kind === 'claude'
-    ? [DESK ? '📖 Ler todo o WhatsApp' : '📖 Ler todas as conversas', 'O que tenho hoje?', 'Minha semana', 'Meus lembretes', 'Atividades pendentes'].map(q => `<button data-quick="${esc(q)}">${esc(q)}</button>`).join('')
+    ? [DESK ? '📖 Ler todo o WhatsApp' : '📖 Ler todas as conversas', 'O que tenho hoje?', 'Minha semana', '📊 Resumo da semana', 'Meus lembretes', 'Atividades pendentes'].map(q => `<button data-quick="${esc(q)}">${esc(q)}</button>`).join('')
     : '';
   $('#attach').style.display = c.kind === 'claude' ? 'none' : '';
   $('#chat').classList.add('open'); renderMsgs(); if (!WIDE()) history.pushState({ chat: id }, '');
@@ -280,7 +282,7 @@ function askDone(id, motivo, force) {
 }
 function doneAnswer(id, yes) {
   const t = db.tasks.find(x => x.id === id); if (!t) return;
-  if (yes) t.done = true; else t.doneNo = Date.now();
+  if (yes) { t.done = true; t.doneAt = new Date().toISOString(); } else t.doneNo = Date.now();
   t.askDone = false;
   for (const m of db.chats.find(c => c.id === 'claude').messages) if (m.card && m.card.type === 'done?' && m.card.id === id && (m.card.status || 'pendente') === 'pendente') m.card.status = yes ? 'feito' : 'nao';
   save(); render(); if (openChatId) renderMsgs();
@@ -293,6 +295,22 @@ function confirmDoneSheet(id) {
 // triagem: só vira cartão o que é pedido/pergunta a ele, promessa dele ou compromisso com ele
 const ORIGENS = { pedido: p => `${p || 'Alguém'} te pediu`, pergunta: p => `${p || 'Alguém'} te perguntou`, promessa: () => 'Você prometeu', compromisso: () => 'Compromisso com você' };
 function cardHtml(card) {
+  if (card.type === 'aud') {
+    const st = card.status || 'pendente', its = card.items || [], n = its.length;
+    const head = st === 'feito' ? `🎤 ${n > 1 ? n + ' áudios transcritos' : 'Áudio transcrito'}` : st === 'nao' ? 'Áudio não transcrito' : st === 'transcrevendo' ? '🎤 Transcrevendo…' : st === 'erro' ? '⚠️ Não consegui transcrever' : `🎤 ${n > 1 ? n + ' áudios novos' : 'Áudio novo'} · transcrever?`;
+    const rows = its.map(x => `<div class="cs${x.text ? ' tq' : ''}">${x.text ? '' : '○ '}<b>${esc(x.who || card.chat)}</b>${x.dur ? ' · ' + fmtDur(x.dur) : ''}${x.when ? ' · ' + fmtHour(x.when) : ''}${x.text ? ': “' + esc(x.text.slice(0, 400)) + (x.text.length > 400 ? '…' : '') + '”' : x.erro ? ' — ⚠ ' + esc(x.erro) : ''}</div>`).join('');
+    const acts = st === 'pendente' ? `<button class="ok" data-act="aud-go" data-id="${card.id}">🎤 Transcrever</button><button data-act="aud-auto" data-id="${card.id}">Sempre, sozinha</button><button data-act="aud-no" data-id="${card.id}">Agora não</button>`
+      : st === 'erro' ? `<button data-act="aud-go" data-id="${card.id}">Tentar de novo</button>` : '';
+    return `<div class="card aud ${st === 'nao' ? 'off' : ''}"><div class="ch" style="${st === 'pendente' || st === 'transcrevendo' ? 'background:#d9fdd3;color:#0b3d1e' : 'background:var(--panel);color:var(--muted)'}">${head}</div><div class="cb">
+      <div class="ct">💬 ${esc(card.chat)}</div>${rows}${st === 'pendente' ? '<div class="cs hint2">Eu toco o áudio sem som para transcrever; quem mandou vê como ouvido.</div>' : ''}</div>${acts ? `<div class="acts">${acts}</div>` : ''}</div>`;
+  }
+  if (card.type === 'week') {
+    const k = card.counts || {};
+    return `<div class="card"><div class="ch" style="background:#1d4ed8;color:#fff">📊 Resumo da semana · ${esc(shortRange(card.de, card.ate))}</div><div class="cb">
+      <div class="ct">${(card.obras || []).slice(0, 6).map(esc).join(' · ') || 'Geral'}</div>
+      <div class="cs">✅ ${k.feito || 0} feito · ⏳ ${k.pendente || 0} pendente · 📨 ${k.esperando || 0} esperando terceiros</div>${card.atencao ? `<div class="cs" style="color:#b42318">⚠️ ${esc(card.atencao)}</div>` : ''}</div>
+      <div class="acts"><button class="ok" data-act="week-view" data-id="${card.id}">Ver resumo</button>${card.file ? `<button data-act="week-open" data-id="${card.id}">Abrir no Drive</button>` : ''}</div></div>`;
+  }
   if (card.type === 'done?') {
     const t = db.tasks.find(x => x.id === card.id); const st = card.status || 'pendente';
     if (!t) return `<div class="card off"><div class="cb cs">Atividade removida</div></div>`;
@@ -402,7 +420,7 @@ function renderSide() {
   if (atBottom || !renderSide.done) box.scrollTop = box.scrollHeight; renderSide.done = true;
   if (sideVisible() && !document.hidden && c.unread) { c.unread = 0; save(); }
   renderPTasks();
-  $('#sideStatus').textContent = waSweeping ? (waSweepFull ? 'lendo todas as conversas…' : 'abrindo as conversas não lidas…') : reading || waBusy ? 'lendo mensagens…' : (DESK && db.settings.waRead !== false ? 'lendo seu WhatsApp' : 'online');
+  $('#sideStatus').textContent = waSweeping ? (waSweepFull ? 'lendo todas as conversas…' : 'abrindo as conversas não lidas…') : audN > 0 ? 'transcrevendo áudio…' : weekBusy ? 'montando o resumo da semana…' : reading || waBusy ? 'lendo mensagens…' : (DESK && db.settings.waRead !== false ? 'lendo seu WhatsApp' : 'online');
 }
 function pushMsg(chatId, msg) {
   const c = db.chats.find(x => x.id === chatId);
@@ -421,7 +439,7 @@ async function send(text) {
   const c = db.chats.find(x => x.id === openChatId);
   const m = pushMsg(c.id, { from: 'me', text });
   $('#input').value = ''; autosize();
-  if (c.kind === 'claude') { if (/ler todo o whatsapp/i.test(text)) sweepNow(); else if (/^📖|ler todas as conversas/i.test(text)) await readAll(true); else await askClaude(text); }
+  if (c.kind === 'claude') { if (/ler todo o whatsapp/i.test(text)) sweepNow(); else if (/^📖|ler todas as conversas/i.test(text)) await readAll(true); else if (WEEK_RE.test(text)) await weeklyReport({ manual: true }); else await askClaude(text); }
   else if (c.watch) queueRead(c.id);
 }
 async function sendImage(file) {
@@ -466,7 +484,9 @@ const TOOLS = [
   { name: 'concluir_atividade', description: 'Pergunta ao usuário, num cartão "Isso foi feito?" com Sim/Não, se a atividade foi feita. A atividade só sai da lista quando ele clicar Sim. Diga a ele que deixou a confirmação no cartão; nunca diga que já deu baixa.',
     input_schema: { type: 'object', properties: { id: { type: 'string' }, motivo: { type: 'string', description: 'Por que parece feita, ex.: "você disse que já enviou"' } }, required: ['id'] } },
   { name: 'excluir_compromisso', description: 'Exclui um compromisso. Só use quando o usuário pedir explicitamente.',
-    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } }
+    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
+  { name: 'resumo_semana', description: 'Monta o resumo da semana por obra (feito, pendente, esperando terceiros e próxima semana), salva no Drive (WhatsApp v1/Resumos semanais) e mostra um cartão no chat. Use quando ele pedir resumo, relatório ou balanço da semana. Depois responda em UMA linha.',
+    input_schema: { type: 'object', properties: {} } }
 ];
 
 async function runTool(name, i, chatId, srcId) {
@@ -535,6 +555,7 @@ async function runTool(name, i, chatId, srcId) {
     }
     case 'concluir_atividade': { const t = db.tasks.find(x => x.id === i.id); if (!t) return { erro: 'não encontrada' }; if (t.done) return { ok: true, aviso: 'já estava concluída' }; askDone(t.id, i.motivo || '', true); return { ok: true, aviso: 'cartão "Isso foi feito?" mostrado; só sai da lista quando ele clicar Sim' }; }
     case 'excluir_compromisso': { if (!db.events.some(e => e.id === i.id)) return { erro: 'não encontrado' }; delEvent(i.id); return { ok: true }; }
+    case 'resumo_semana': { const r = await weeklyReport({}); return r.error ? { erro: r.error } : { ok: true, aviso: 'cartão do resumo mostrado no chat', arquivo: r.file || '', obras: r.obras }; }
   }
   return { erro: 'ferramenta desconhecida' };
 }
@@ -785,6 +806,13 @@ function settingsSheet() {
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sL" ${s.driveLog !== false ? 'checked' : ''} style="width:auto"> Guardar no Drive o texto das conversas lidas e os resumos do dia (WhatsApp v1/Conversas e Resumos)</label>
       <input id="sI" value="${esc(s.waIgnore || '')}" placeholder="Ignorar conversas (nomes separados por vírgula)" style="margin-top:6px">
       <div class="hint">Abrir a conversa marca como lida no WhatsApp (e manda o visto azul, se ativo). O texto vai para a Anthropic para análise (custo por uso da sua chave).</div></div>
+    <div class="field"><label>🎤 Áudios do WhatsApp viram texto</label>
+      <div style="display:flex;gap:6px"><select id="sTp" style="width:auto">${Object.entries(STT_NAMES).map(([k, v]) => `<option value="${k}" ${(s.sttProvider || 'groq') === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <input id="sTk" type="password" value="${esc(s.sttKey || '')}" placeholder="Chave (Groq: gsk_…)" autocomplete="off" style="flex:1"></div>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sTa" ${s.sttAuto ? 'checked' : ''} style="width:auto"> Transcrever áudios novos sozinha, sem perguntar (quem mandou vê o áudio como ouvido)</label>
+      <div class="hint">O áudio que você toca no WhatsApp vira texto e passa pela triagem; áudio novo que você ainda não ouviu aparece no chat com o botão Transcrever. A transcrição e o áudio ficam no Drive, na pasta da conversa. Chave da Groq: console.groq.com → API Keys → Create API Key (tem plano gratuito; acima do limite, US$ 0,04 por hora de áudio). O áudio vai para o serviço escolhido só para virar texto.</div></div>
+    <div class="field"><label>📊 Resumo da semana</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400"><input type="checkbox" id="sWk" ${s.weekly !== false ? 'checked' : ''} style="width:auto"> Toda sexta às 17 h, por obra: feito, pendente e esperando terceiros (salvo no Drive, em WhatsApp v1/Resumos semanais)</label></div>
     <div class="field"><label>Sobre você e seu trabalho</label><textarea id="sP" rows="3">${esc(s.profile || '')}</textarea><div class="hint">Ajuda a assistente a entender o que é com você nas mensagens.</div></div>
     <div class="field"><label>Memória da assistente (${db.facts.length})</label><textarea id="sF" rows="4" placeholder="Uma linha por fato. Ela acrescenta sozinha o que aprende nas conversas.">${esc(db.facts.join('\n'))}</textarea></div>` : ''}
     ${DESK ? `<div class="field"><label>📁 Pasta dos arquivos (Google Drive)</label>
@@ -845,7 +873,7 @@ document.addEventListener('click', async e => {
   if (d.opencal !== undefined) { openCal(true); return; }
   if (d.chat) { openChat(d.chat); return; }
   if (d.gochat) { closeSheet(); openCal(false); openChat(d.gochat); return; }
-  if (d.toggle) { const t = db.tasks.find(x => x.id === d.toggle); if (!t.done) { if (e.target.type === 'checkbox') e.target.checked = false; confirmDoneSheet(t.id); return; } t.done = false; save(); render(); if (openChatId) renderMsgs(); if ($('#sheetBg').classList.contains('open') && el.closest('.sheet')) { const evId = t.eventId; if (evId) eventDetail(evId); } return; }
+  if (d.toggle) { const t = db.tasks.find(x => x.id === d.toggle); if (!t.done) { if (e.target.type === 'checkbox') e.target.checked = false; confirmDoneSheet(t.id); return; } t.done = false; t.doneAt = ''; save(); render(); if (openChatId) renderMsgs(); if ($('#sheetBg').classList.contains('open') && el.closest('.sheet')) { const evId = t.eventId; if (evId) eventDetail(evId); } return; }
   if (d.gcal) { window.open(gcalUrl(db.events.find(x => x.id === d.gcal)), '_blank'); return; }
   if (d.ics) { downloadIcs(db.events.find(x => x.id === d.ics)); return; }
   if (d.event && !d.act) { eventDetail(d.event); return; }
@@ -892,6 +920,17 @@ document.addEventListener('click', async e => {
     case 'inbox-ok': case 'sug-yes': if (db.inbox.some(x => x.id === id)) acceptInbox(id); else { sugResolve(id, 'descartada'); save(); renderSide(); } break;
     case 'inbox-no': case 'sug-no': db.inbox = db.inbox.filter(x => x.id !== id); sugResolve(id, 'descartada'); save(); renderSide(); render(); break;
     case 'inbox-all': [...db.inbox].forEach(x => acceptInbox(x.id, true)); render(); break;
+    case 'aud-go': case 'aud-auto': {
+      const m = audCards().find(x => x.card.id === id); if (!m) break;
+      if (!sttOn()) { toast('Cole a chave da transcrição em Configurações'); settingsSheet(); break; }
+      if (d.act === 'aud-auto') { db.settings.sttAuto = true; toast('Daqui para frente transcrevo os áudios novos sozinha'); }
+      const ids = m.card.items.filter(x => !x.text).map(x => x.id); m.card.items.forEach(x => { x.erro = ''; });
+      m.card.status = 'transcrevendo'; save(); renderSide(); if (openChatId === 'claude') renderMsgs();
+      audQueue.push({ chat: m.card.chat, ids }); audPump(); break;
+    }
+    case 'aud-no': { const m = audCards().find(x => x.card.id === id); if (m) { m.card.status = 'nao'; save(); renderSide(); if (openChatId === 'claude') renderMsgs(); } break; }
+    case 'week-view': { const m = weekCard(id); if (m) sheet(`<div class="mdv">${mdHtml(m.card.md || '')}</div><div class="btns">${m.card.file ? `<button class="btn" data-act="week-open" data-id="${id}">Abrir no Drive</button>` : ''}<button class="btn pri" data-act="close">Fechar</button></div>`); break; }
+    case 'week-open': { const m = weekCard(id); if (m && m.card.file && window.wv1desk.openPath) window.wv1desk.openPath(m.card.file); break; }
     case 'apply-update': { el.textContent = 'Atualizando…'; el.disabled = true; const r = await window.wv1desk.applyUpdate(); if (r && r.error) { toast('Falhou: ' + r.error); closeSheet(); } break; }
     case 'new-chat': if (tab === 'agenda') eventForm({}); else if (tab === 'tasks') taskForm({}); else newChatSheet(); break;
     case 'settings': settingsSheet(); break;
@@ -925,16 +964,17 @@ document.addEventListener('click', async e => {
       if ($('#sD') && dlInfo && $('#sD').value.trim() !== dlInfo.dir) { const v = $('#sD').value.trim(); window.wv1desk.dlSet(v === dlInfo.def ? '' : v).then(r => { dlInfo = r; if (r.error) toast('⚠️ Pasta dos downloads: ' + r.error); }); }
       if ($('#gI')) { db.settings.gcalId = $('#gI').value.trim(); db.settings.gcalSecret = $('#gS').value.trim(); }
       if ($('#sAvD')) { db.settings.avisoDia = $('#sAvD').checked; db.settings.avisoHora = $('#sAvH').checked; }
+      if ($('#sTk')) { db.settings.sttProvider = $('#sTp').value; db.settings.sttKey = $('#sTk').value.trim(); db.settings.sttAuto = $('#sTa').checked; db.settings.weekly = $('#sWk').checked; audCfg(); }
       db.settings.myName = $('#sN').value.trim(); db.settings.apiKey = $('#sK').value.trim(); db.settings.model = $('#sM').value.trim() || 'claude-sonnet-5-5';
       save(); closeSheet(); render(); if (openChatId) openChat(openChatId); toast('Salvo'); break;
     case 'export': {
-      const copy = { ...db, settings: { ...db.settings, apiKey: '' } };
+      const copy = { ...db, settings: { ...db.settings, apiKey: '', sttKey: '' } };
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(copy, null, 1)], { type: 'application/json' }));
       a.download = `whatsapp-v1-backup-${ymd(new Date())}.json`; a.click(); break;
     }
     case 'import': {
       const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json';
-      inp.onchange = async () => { try { const data = JSON.parse(await inp.files[0].text()); if (!data.chats) throw 0; data.settings = { ...data.settings, apiKey: db.settings.apiKey }; db = data; save(); closeSheet(); render(); toast('Backup restaurado'); } catch { toast('Arquivo inválido'); } };
+      inp.onchange = async () => { try { const data = JSON.parse(await inp.files[0].text()); if (!data.chats) throw 0; data.settings = { ...data.settings, apiKey: db.settings.apiKey, sttKey: db.settings.sttKey }; db = data; save(); closeSheet(); render(); toast('Backup restaurado'); } catch { toast('Arquivo inválido'); } };
       inp.click(); break;
     }
     case 'ctype': document.querySelectorAll('[data-act="ctype"]').forEach(b => b.classList.toggle('on', b === el)); $('#cMw').style.display = id === 'group' ? '' : 'none'; break;
@@ -1003,7 +1043,7 @@ async function sendSide() {
   $('#sideInput').value = '';
   pushMsg('claude', { from: 'me', text: t });
   if (/^(ok|okay|pode|pode sim|manda|vai|faz|confirmo|aprovado|pode mandar|pode fazer|ok pode)\s*[.!]*$/i.test(t) && db.plans.some(p => p.status === 'aguardando_ok')) { runPlan(db.plans.find(p => p.status === 'aguardando_ok').id); return; }
-  if (/ler todo o whatsapp/i.test(t)) sweepNow(); else if (/^📖|ler todas as conversas/i.test(t)) await readAll(true); else await askClaude(t);
+  if (/ler todo o whatsapp/i.test(t)) sweepNow(); else if (/^📖|ler todas as conversas/i.test(t)) await readAll(true); else if (WEEK_RE.test(t)) await weeklyReport({ manual: true }); else await askClaude(t);
 }
 function sweepNow() {
   if (!DESK) return;
@@ -1100,7 +1140,7 @@ function ingestWa(batches) {
       if (waSeen.has(m.id)) continue; waSeen.add(m.id);
       const t = waTs(m.meta);
       if (!m.text || m.text.length < 2) continue;
-      const rec = { chat: b.chat, who: m.out ? 'Eu' : (t.who || m.who || b.chat), when: localISO(t.d), text: m.text.slice(0, 800) };
+      const rec = { chat: b.chat, who: m.out ? 'Eu' : (t.who || m.who || b.chat), when: localISO(t.d), text: m.text.slice(0, m.audio ? 3000 : 800) };
       const isPrev = m.id.startsWith('p:'), pk = b.chat + '|' + rec.text; // prévia da lista (sem hora/autor) vs. mensagem real
       if (isPrev) { rec.prev = 1; prevSeen.add(pk); }
       else if (DESK && db.settings.driveLog !== false) (toLog[b.chat] = toLog[b.chat] || []).push(rec); // histórico completo no Drive
@@ -1114,7 +1154,15 @@ function ingestWa(batches) {
   }
   db.meta.waSeen = [...waSeen].slice(-6000); if (db.waLog.length > 2000) db.waLog.splice(0, db.waLog.length - 2000); save();
   for (const [chat, lines] of Object.entries(toLog)) window.wv1desk.logAppend({ chat, lines: lines.sort((a, b) => a.when.localeCompare(b.when)) }).catch(() => {});
-  if (waQueue.length) { clearTimeout(waTimer); waTimer = setTimeout(flushWa, waQueue.length >= 25 ? 2000 : 45000); }
+  if (waQueue.length) waSchedule(waQueue.length >= 25 ? 2000 : 45000);
+}
+// espera juntar mensagens antes da triagem; uma triagem pedida com pressa (áudio que ele mandou transcrever) não é empurrada
+let waUrgent = 0;
+function waSchedule(ms, urgent) {
+  const now = Date.now();
+  if (!urgent && waUrgent > now && waUrgent <= now + ms) return;
+  if (urgent) waUrgent = now + ms;
+  clearTimeout(waTimer); waTimer = setTimeout(flushWa, ms);
 }
 function addInbox(it) {
   const key = (it.titulo || '').toLowerCase();
@@ -1182,6 +1230,7 @@ Você lê as mensagens novas do WhatsApp dele ("Eu" = ele) e age como uma secret
 4) Resuma: para cada conversa com novidade de trabalho (decisão, pedido, número, prazo, combinado), 1 a 3 frases objetivas em "resumos", mesmo sem ação para ele. Conversa só social não entra.
 5) Notas: informação de referência que ele vai querer consultar depois (endereço de obra, número de contrato/processo/ofício, valor combinado, código, horário fixo, decisão fechada) vai em "notas", uma frase curta e completa cada, só se for nova. Notas já existentes:\n${db.notes.trim().slice(-1500) || '(nenhuma)'}
 Ignore conversa social, figurinhas, propaganda, correntes, avisos genéricos de grupo e o que não é com ele. Em grupos grandes, só o que o menciona ou cabe ao papel dele.
+Mensagens que começam com 🎤 são áudios transcritos automaticamente: nomes, números e termos técnicos podem ter saído errados na transcrição; entenda pela intenção e, no trecho, comece com "🎤".
 Prioridade: alta = prazo em até 24h, cliente ou órgão público cobrando, dinheiro, ou pergunta a ele sem resposta há mais de 2h; media = prazo nesta semana; baixa = o resto.
 Agora: ${localISO(now)} (${now.toLocaleDateString('pt-BR', { weekday: 'long' })}). Datas relativas contam a partir da hora de cada mensagem; sem hora, use só a data.
 Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '(nenhum)'}\nSugestões ainda não confirmadas (não repita):\n${sug || '(nenhuma)'}\nSe não houver nada novo, chame a ferramenta com listas vazias.`,
@@ -1261,7 +1310,7 @@ async function runPlan(id) {
       else if (st.tipo === 'compromisso') { const ev = addEvent({ title: st.titulo, start: st.inicio.slice(0, 16), end: (st.fim || '').slice(0, 16), location: st.local || '', notes: st.observacoes || '', chatId: 'claude' }); st.ref = ev.id; }
       else if (st.tipo === 'lembrete') { const t = addTask({ title: st.titulo, remindAt: st.quando.slice(0, 16), chatId: 'claude' }); st.ref = t.id; }
       else if (st.tipo === 'nota') addNote(st.texto);
-      else if (st.tipo === 'concluir') { const t = db.tasks.find(x => x.id === (st.atividade_id || p.taskId)); if (t) t.done = true; }
+      else if (st.tipo === 'concluir') { const t = db.tasks.find(x => x.id === (st.atividade_id || p.taskId)); if (t) { t.done = true; t.doneAt = new Date().toISOString(); } }
       st.status = 'feito'; st.erro = '';
     } catch (e) { st.status = 'erro'; st.erro = e.message; failed = st; break; }
     save(); render();
@@ -1347,6 +1396,182 @@ async function gcalPull() { // traz 7 dias para trás e 90 para a frente; o que 
   finally { gcalPulling = false; }
 }
 
+// ---------- áudios do WhatsApp: viram texto (Groq ou OpenAI, chave dele) e entram na leitura e na triagem como mensagem ----------
+const STT_NAMES = { groq: 'Groq (recomendado)', openai: 'OpenAI' };
+const STT_PROMPT = 'Áudio de WhatsApp em português do Brasil, trabalho de engenharia civil: SPT, CPTu, sondagem rotativa, CBUQ, Marshall, Benkelman, talude, recalque, aterro sanitário, ART, medição, aditivo, reequilíbrio, DNIT, ABNT, Trojan, NEV.';
+const sttOn = () => DESK && !!(db.settings.sttKey || '').trim() && db.settings.waRead !== false && !!(window.wv1desk && window.wv1desk.stt);
+const fmtDur = s => s ? `${Math.floor(s / 60)}:${pad(Math.round(s % 60))}` : '';
+const audDone = new Set(db.meta.audioDone || []), audBusy = new Set(), audQueue = [], audWaiters = {};
+var audN = 0, audPumping = false; // var: o painel lê antes desta linha rodar
+function audMark(...keys) { keys.filter(Boolean).forEach(k => audDone.add(k)); db.meta.audioDone = [...audDone].slice(-4000); }
+function audCfg() { try { waWv && waWv.send('wa-audio-cfg', { on: sttOn() }); } catch {} }
+function audCards() { return db.chats.find(c => c.id === 'claude').messages.filter(m => m.card && m.card.type === 'aud'); }
+function audUpdate(id, patch) { // atualiza os cartões que têm esse áudio
+  if (!id) return;
+  for (const m of audCards()) {
+    const it = (m.card.items || []).find(x => x.id === id); if (!it) continue;
+    if (patch) Object.assign(it, patch);
+    const its = m.card.items;
+    if (its.every(x => x.text)) m.card.status = 'feito';
+    else if (m.card.status === 'transcrevendo' && its.every(x => x.text || x.erro)) m.card.status = 'erro';
+  }
+  save(); renderSide(); if (openChatId === 'claude') renderMsgs();
+}
+function audIgnored(chat) { const ign = (db.settings.waIgnore || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean); return ign.some(x => String(chat).toLowerCase().includes(x)); }
+// o leitor viu áudios na conversa aberta: os novos (até 36 h, de outra pessoa) viram um cartão "transcrever?" por conversa
+function audioSeen(a) {
+  if (!sttOn() || !a || !a.chat || audIgnored(a.chat)) return;
+  const asked = new Set(db.meta.audioAsked || []), cutoff = Date.now() - 36 * 3600e3;
+  const fresh = (a.audios || []).filter(x => x.id && !x.out && !audDone.has(x.id) && !asked.has(x.id) && waTs(x.meta).d.getTime() >= cutoff);
+  if (!fresh.length) return;
+  db.meta.audioAsked = [...asked, ...fresh.map(x => x.id)].slice(-3000);
+  const items = fresh.map(x => { const t = waTs(x.meta); return { id: x.id, dur: x.dur || 0, who: t.who, when: localISO(t.d) }; });
+  const st = db.settings.sttAuto ? 'transcrevendo' : 'pendente'; // modo sozinha: o cartão já nasce "transcrevendo" e mostra o texto quando sai
+  const m = audCards().reverse().find(x => x.card.chat === a.chat && x.card.status === st);
+  if (m) { m.card.items.push(...items); save(); renderSide(); if (openChatId === 'claude') renderMsgs(); }
+  else pushMsg('claude', { from: 'them', card: { type: 'aud', id: uid(), chat: a.chat, items, status: st } });
+  if (db.settings.sttAuto) { audQueue.push({ chat: a.chat, ids: items.map(x => x.id), auto: true }); if (!waSweeping) audPump(); }
+}
+// pede ao leitor para tocar (sem som) os áudios de uma conversa; o arquivo de cada um chega por 'wa-audio'
+function audGet(job) {
+  return new Promise(resolve => {
+    const reqId = uid(); audWaiters[reqId] = resolve;
+    setTimeout(() => { if (audWaiters[reqId]) { delete audWaiters[reqId]; resolve({ ok: false, erro: 'o WhatsApp não respondeu' }); } }, 30000 + job.ids.length * 16000);
+    try { waWv.send('wa-audio-get', { reqId, chat: job.chat, ids: job.ids, auto: !!job.auto }); } catch (e) { delete audWaiters[reqId]; resolve({ ok: false, erro: e.message }); }
+  });
+}
+async function audPump() {
+  if (audPumping || !waWv) return; audPumping = true;
+  try {
+    while (audQueue.length) {
+      const job = audQueue.shift(), r = await audGet(job);
+      if (r.busy && job.auto) { audQueue.unshift(job); break; } // você está usando o WhatsApp: fica para a próxima leitura
+      for (const id of r.miss || []) audUpdate(id, { erro: 'não achei o áudio na conversa' });
+      if (!r.ok) for (const id of job.ids) audUpdate(id, { erro: r.erro || 'falhou' });
+    }
+  } finally { audPumping = false; }
+}
+async function onWaAudio(a) {
+  if (!a || !a.buf || !sttOn()) return;
+  const hk = 'h:' + a.hash, key = a.id || hk;
+  if (audDone.has(hk) || (a.id && audDone.has(a.id))) { if (a.id) { const old = audCards().flatMap(m => m.card.items).find(x => x.id === a.id && x.text); if (old) audUpdate(a.id, null); } return; }
+  if (audBusy.has(key)) return;
+  audBusy.add(key); audN++; renderSide();
+  const t = a.meta ? waTs(a.meta) : { d: new Date(), who: '' };
+  let r;
+  try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: db.settings.sttKey.trim(), buf: a.buf, type: a.type, chat: a.chat, when: t.d.toISOString(), prompt: STT_PROMPT }); }
+  catch (e) { r = { error: e.message }; }
+  audBusy.delete(key); audN--; renderSide();
+  if (!r || r.error) { audUpdate(a.id, { erro: (r && r.error) || 'falhou' }); toast('🎤 Não transcrevi o áudio: ' + ((r && r.error) || 'falhou')); return; }
+  audMark(key, hk);
+  const text = r.text || '(sem fala reconhecível)';
+  const meta = a.meta || `[${pad(t.d.getHours())}:${pad(t.d.getMinutes())}, ${pad(t.d.getDate())}/${pad(t.d.getMonth() + 1)}/${t.d.getFullYear()}] ${a.chat}: `;
+  ingestWa([{ chat: a.chat, msgs: [{ id: 'a:' + key, meta, out: a.out, audio: true, text: `🎤 (áudio${a.dur ? ' ' + fmtDur(a.dur) : ''}) ${text}` }] }]);
+  audUpdate(a.id, { text });
+  if (waQueue.length && a.req) waSchedule(3000, true); // pedido por ele: triagem logo
+  if (!a.req) toast(`🎤 Áudio${a.chat ? ' de ' + a.chat : ''} virou texto`);
+  save();
+}
+// arquivo de áudio baixado no WhatsApp (ogg, mp3, m4a…) também vira texto
+async function audFile(d) {
+  const key = 'f:' + d.downloads; if (audDone.has(key)) return;
+  audN++; renderSide();
+  let r; try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: db.settings.sttKey.trim(), file: d.downloads, save: false, prompt: STT_PROMPT }); } catch (e) { r = { error: e.message }; }
+  audN--; renderSide();
+  if (!r || r.error) return toast('🎤 Não transcrevi ' + d.name + ': ' + ((r && r.error) || 'falhou'));
+  audMark(key);
+  const now = new Date(), chat = d.chat || 'Áudios baixados', meta = `[${pad(now.getHours())}:${pad(now.getMinutes())}, ${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}] ${chat}: `;
+  ingestWa([{ chat, msgs: [{ id: key, meta, audio: true, text: `🎤 (arquivo de áudio ${d.name}) ${r.text || '(sem fala)'}` }] }]);
+  pushMsg('claude', { from: 'them', text: `🎤 ${d.name}${d.chat ? ' · ' + d.chat : ''}\n“${r.text || '(sem fala reconhecível)'}”` });
+  save();
+}
+
+// ---------- resumo da semana: toda sexta às 17 h (ou quando ele pede), por obra, salvo no Drive ----------
+const WEEK_RE = /^📊|resumo (da|desta|de) semana|relat[oó]rio (da|desta|de) semana|balan[cç]o (da|desta) semana/i;
+var weekBusy = false;
+function weekRange(ref) { const mon = new Date(ref); mon.setHours(0, 0, 0, 0); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7)); const sun = new Date(mon); sun.setDate(sun.getDate() + 6); return { de: ymd(mon), ate: ymd(sun) }; }
+function lastFriday17() { const d = new Date(); d.setHours(17, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 2) % 7)); return d; }
+const brDay = s => { const d = parseLocal(s); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; };
+const shortRange = (a, b) => a && b ? `${brDay(a)} a ${brDay(b)}` : '';
+function weekCard(id) { return db.chats.find(c => c.id === 'claude').messages.find(m => m.card && m.card.type === 'week' && m.card.id === id); }
+function weekData(ref) {
+  const now = new Date(), w = weekRange(ref), nxs = new Date(parseLocal(w.ate)); nxs.setDate(nxs.getDate() + 1); const nx = weekRange(nxs);
+  const day = iso => iso ? localISO(new Date(iso)).slice(0, 10) : '', inW = d => d && d >= w.de && d <= w.ate;
+  const evLine = e => `- ${e.start.slice(0, 10)} ${evHour(e)} ${e.title}${e.location ? ' @ ' + e.location : ''}`;
+  const feitas = db.tasks.filter(t => t.done && inW(day(t.doneAt))).map(t => `- ${t.title} (feito ${brDay(day(t.doneAt))})`);
+  const pend = db.tasks.filter(t => !t.done).map(t => { const q = t.remindAt || t.due, late = q && q < (q.length > 10 ? localISO(now) : ymd(now)); return `- ${t.title}${q ? ` (${late ? 'ATRASADA, ' : ''}prazo ${q.replace('T', ' ')})` : ''}`; });
+  const evW = sortedEvents().filter(e => inW(e.start.slice(0, 10))).map(evLine);
+  const evN = sortedEvents().filter(e => e.start.slice(0, 10) >= nx.de && e.start.slice(0, 10) <= nx.ate).map(evLine);
+  const planos = db.plans.filter(p => p.status === 'feito' && inW(day(p.fim))).flatMap(p => p.passos.filter(x => x.tipo === 'whatsapp').map(x => `- ${brDay(day(p.fim))} para ${x.conversa}: "${String(x.mensagem).slice(0, 220)}"`));
+  const log = db.waLog.filter(m => !m.prev && inW(m.when.slice(0, 10))), mine = [];
+  log.forEach((m, i) => { if (m.who === 'Eu') mine.push(`- ${m.when.slice(5, 16).replace('T', ' ')} ${m.chat}: "${m.text.slice(0, 200)}"${log.slice(i + 1).some(x => x.chat === m.chat && x.who !== 'Eu') ? '' : ' [sem resposta depois]'}`); });
+  const sug = db.inbox.map(x => `- ${x.titulo}${x.conversa ? ' (' + x.conversa + ')' : ''}`);
+  return { w, nx, feitas, pend, evW, evN, planos, mine: mine.slice(-80), sug };
+}
+function weekMd(r, w) {
+  const L = [`# Resumo da semana — ${shortRange(w.de, w.ate)}/${w.de.slice(0, 4)}`, `Gerado em ${new Date().toLocaleString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`, ''];
+  const list = (t, a) => { if (a && a.length) { L.push(`**${t}**`); a.forEach(x => L.push('- ' + x)); L.push(''); } };
+  if ((r.atencao || []).length) { L.push('## ⚠️ Atenção'); r.atencao.forEach(x => L.push('- ' + x)); L.push(''); }
+  for (const o of r.obras || []) {
+    L.push('## ' + (o.nome || 'Geral'));
+    list('✅ Feito', o.feito); list('⏳ Pendente', o.pendente);
+    list('📨 Esperando terceiros', (o.esperando || []).map(e => typeof e === 'string' ? e : [e.o_que, e.quem && '— ' + e.quem, e.desde && '(desde ' + e.desde + ')'].filter(Boolean).join(' ')));
+    if (!(o.feito || []).length && !(o.pendente || []).length && !(o.esperando || []).length) L.push('- sem movimento registrado', '');
+  }
+  if ((r.proxima_semana || []).length) { L.push('## 📅 Próxima semana'); r.proxima_semana.forEach(x => L.push('- ' + x)); L.push(''); }
+  return L.join('\n').trim() + '\n';
+}
+function mdHtml(md) { // markdown simples do resumo → HTML
+  return String(md).split('\n').map(l => { const e = esc(l).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'); return l.startsWith('# ') ? `<h2>${e.slice(2)}</h2>` : l.startsWith('## ') ? `<h3>${e.slice(3)}</h3>` : l.startsWith('- ') ? `<div class="li">• ${e.slice(2)}</div>` : l.trim() ? `<div>${e}</div>` : ''; }).join('');
+}
+async function weeklyReport({ ref, auto, manual }) {
+  if (weekBusy) return { error: 'o resumo já está sendo montado' };
+  weekBusy = true; renderSide();
+  const typing = manual ? pushMsg('claude', { from: 'them', text: 'montando o resumo da semana…', pending: true }) : null;
+  try {
+    const D = weekData(ref || new Date()), w = D.w;
+    let sums = ''; try { if (DESK && window.wv1desk.summaryRecent) sums = await window.wv1desk.summaryRecent({ dias: 8, max: 14000 }) || ''; } catch {}
+    let r;
+    if (!db.settings.apiKey) r = { obras: [{ nome: 'Geral', feito: D.feitas.map(x => x.slice(2)), pendente: D.pend.map(x => x.slice(2)), esperando: D.mine.filter(x => x.includes('[sem resposta depois]')).map(x => x.slice(2).replace(' [sem resposta depois]', '')) }], proxima_semana: D.evN.map(x => x.slice(2)), atencao: [] };
+    else {
+      const sec = (t, a) => `${t}:\n${(Array.isArray(a) ? a.join('\n') : a) || '(nada)'}`;
+      const dados = [sec('Atividades concluídas na semana', D.feitas), sec('Atividades pendentes (todas)', D.pend), sec('Sugestões do WhatsApp ainda sem resposta dele', D.sug), sec('Compromissos desta semana', D.evW), sec('Compromissos da próxima semana', D.evN), sec('Mensagens que o app enviou por ele (planos aprovados)', D.planos), sec('Mensagens dele no WhatsApp nesta semana ([sem resposta depois] = ninguém escreveu na conversa depois)', D.mine), sec('Resumos diários do WhatsApp (escritos por você; use só os desta semana)', sums)].join('\n\n');
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': db.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: db.settings.model || 'claude-sonnet-5-5', max_tokens: 3000,
+          system: `Você é a secretária executiva de ${db.settings.myName || 'o usuário'}. Perfil dele: ${db.settings.profile || '(não informado)'}
+Memória (pessoas, obras, clientes):\n${db.facts.slice(-60).map(f => '- ' + f).join('\n') || '(nada ainda)'}
+Monte o resumo da semana de ${w.de} a ${w.ate} usando SÓ os dados que ele mandar. Agrupe por obra, contrato ou cliente (use os nomes da memória e das conversas, ex.: "Obra Araquari (Trojan)"); o que não for de uma obra vai em "Geral" e o que for pessoal em "Pessoal". Para cada grupo:
+- feito: o que foi concluído ou entregue na semana (atividades marcadas como feitas, entregas confirmadas nas conversas e nos resumos);
+- pendente: o que ainda depende DELE (atividades abertas, pedidos e perguntas a ele sem resposta), com prazo quando houver, e "ATRASADA" se passou;
+- esperando: o que ele pediu ou cobrou de outra pessoa e ainda não veio (mensagens dele com pedido e sem resposta depois, mensagens enviadas pelos planos), com quem e desde quando.
+Frases curtas e concretas, com número, documento e prazo quando houver. Não invente nem estime: sem dado, deixe de fora. Não repita o mesmo item em dois grupos. Em "atencao", no máximo 4 riscos reais (prazo vencendo, contrato, órgão público cobrando, dinheiro, conflito de agenda). Em "proxima_semana", os compromissos e prazos de ${D.nx.de} a ${D.nx.ate}.`,
+          tools: [{ name: 'resumo_semanal', description: 'Resumo da semana por obra', input_schema: { type: 'object', properties: {
+            obras: { type: 'array', items: { type: 'object', properties: { nome: { type: 'string' }, feito: { type: 'array', items: { type: 'string' } }, pendente: { type: 'array', items: { type: 'string' } },
+              esperando: { type: 'array', items: { type: 'object', properties: { o_que: { type: 'string' }, quem: { type: 'string' }, desde: { type: 'string', description: 'DD/MM' } }, required: ['o_que'] } } }, required: ['nome'] } },
+            proxima_semana: { type: 'array', items: { type: 'string' } }, atencao: { type: 'array', items: { type: 'string' } } }, required: ['obras'] } }],
+          tool_choice: { type: 'tool', name: 'resumo_semanal' },
+          messages: [{ role: 'user', content: dados }] })
+      });
+      const data = await res.json(); if (!res.ok) throw new Error(data?.error?.message || ('HTTP ' + res.status));
+      r = data.content.find(b => b.type === 'tool_use')?.input || { obras: [] };
+    }
+    const md = weekMd(r, w);
+    let file = '';
+    if (DESK && window.wv1desk.docWrite) { const o = await window.wv1desk.docWrite({ dir: 'Resumos semanais', name: `Semana ${w.de} a ${w.ate}`, text: md }); if (o && o.file) file = o.file; }
+    const cnt = k => (r.obras || []).reduce((n, o) => n + (o[k] || []).length, 0);
+    if (typing) { const c = db.chats.find(x => x.id === 'claude'); c.messages = c.messages.filter(x => x.id !== typing.id); }
+    pushMsg('claude', { from: 'them', card: { type: 'week', id: uid(), de: w.de, ate: w.ate, file, md, obras: (r.obras || []).map(o => o.nome), atencao: (r.atencao || [])[0] || '', counts: { feito: cnt('feito'), pendente: cnt('pendente'), esperando: cnt('esperando') } } });
+    if (auto) notify('📊 Resumo da semana pronto', `${(r.obras || []).length} obra(s) · ${cnt('pendente')} pendente(s) · ${cnt('esperando')} esperando terceiros`);
+    return { ok: true, file, obras: (r.obras || []).map(o => o.nome) };
+  } catch (e) {
+    if (typing) { const c = db.chats.find(x => x.id === 'claude'); c.messages = c.messages.filter(x => x.id !== typing.id); }
+    pushMsg('claude', { from: 'them', text: '⚠️ Não consegui montar o resumo da semana: ' + e.message + '. Peça de novo com "📊 Resumo da semana".' });
+    return { error: e.message };
+  } finally { weekBusy = false; save(); renderSide(); }
+}
+
 // ---------- computador: WhatsApp Web dentro do app ----------
 let driveInfo = null, dlInfo = null;
 const dlName = p => String(p || '').split(/[\\/]/).filter(Boolean).pop() || 'Downloads';
@@ -1369,10 +1594,18 @@ if (DESK) {
   gcalRefreshStatus().then(() => { if (gcalOn()) gcalPull(); });
   setInterval(gcalPull, 10 * 60e3);
   setInterval(refreshSums, 10 * 60e3);
-  window.wv1desk.onSaved(d => { db.meta.savedCount = (db.meta.savedCount || 0) + 1; save(); toast(d.downloads ? `⬇️ Salvo em ${dlInfo ? dlName(dlInfo.dir) : 'Downloads'}: ${d.name}${d.appFile ? '' : ' (cópia no Drive)'}` : '📁 Salvo: ' + d.rel); });
+  window.wv1desk.onSaved(d => {
+    db.meta.savedCount = (db.meta.savedCount || 0) + 1; save();
+    toast(d.downloads ? `⬇️ Salvo em ${dlInfo ? dlName(dlInfo.dir) : 'Downloads'}: ${d.name}${d.appFile ? '' : ' (cópia no Drive)'}` : '📁 Salvo: ' + d.rel);
+    if (d.downloads && !d.appFile && /\.(ogg|opus|mp3|m4a|wav|flac|mpga)$/i.test(d.name || '') && sttOn()) audFile(d);
+  });
   waWv = wv;
+  wv.addEventListener('dom-ready', audCfg);
   wv.addEventListener('ipc-message', e => {
     if (e.channel === 'wa-msgs') ingestWa(e.args[0]);
+    if (e.channel === 'wa-audio-seen') audioSeen(e.args[0]);
+    if (e.channel === 'wa-audio') onWaAudio(e.args[0]);
+    if (e.channel === 'wa-audio-done') { const r = e.args[0] || {}; const w = audWaiters[r.reqId]; if (w) { delete audWaiters[r.reqId]; w(r); } }
     if (e.channel === 'wa-sent') { const r = e.args[0] || {}; const w = waSendWaiters[r.id]; if (w) { delete waSendWaiters[r.id]; w(r); } }
     if (e.channel === 'wa-sweep') {
       const st = e.args[0] || {}; waSweeping = st.state === 'start'; waSweepFull = !!st.full; renderSide();
@@ -1381,6 +1614,7 @@ if (DESK) {
         if (manualSweep) { manualSweep = false; pushMsg('claude', { from: 'them', text: st.reason === 'carregando' ? 'O WhatsApp ainda está carregando. Tento de novo daqui a pouco.' : 'Você está usando o WhatsApp agora; faço a leitura completa assim que ele ficar parado.' }); }
       }
       if (st.state === 'end') {
+        if (audQueue.length) setTimeout(audPump, 1500); // áudios na fila (modo sozinha) aproveitam o WhatsApp parado
         if (st.full) db.meta.lastFullSweep = new Date().toISOString(); db.meta.lastSweep = new Date().toISOString(); save();
         if (manualSweep) { manualSweep = false; pushMsg('claude', { from: 'them', text: st.aborted ? `Parei porque você mexeu no WhatsApp. Li ${st.opened} conversa(s); continuo depois.` : st.opened ? `Li ${st.opened} conversa(s). O que precisar de ação aparece na lista acima em instantes.` : 'Não consegui abrir as conversas agora (o WhatsApp ainda carregando?). Tento de novo daqui a pouco.' }); }
       }
@@ -1440,6 +1674,8 @@ function tick() {
   const hr = new Date().getHours();
   if (db.meta.digest !== today && hr >= 6) { db.meta.digest = today; changed = true; briefing('manha'); }
   if (db.meta.digestPm !== today && hr >= 18) { db.meta.digestPm = today; changed = true; briefing('tarde'); }
+  const fri = lastFriday17(); // resumo da semana: sexta às 17 h (se o PC estava desligado, sai até segunda à tarde)
+  if (db.settings.weekly !== false && Date.now() >= fri.getTime() && Date.now() - fri.getTime() < 3 * 864e5 && db.meta.weekly !== ymd(fri)) { db.meta.weekly = ymd(fri); changed = true; weeklyReport({ ref: fri, auto: true }); }
   if (changed) { save(); render(); }
   scheduleSweeps();
 }

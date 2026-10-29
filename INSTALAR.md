@@ -30,6 +30,22 @@ A partir da 1.8.0 o app verifica sozinho ao abrir e a cada 4 h. Melhoria só na 
 ## Planos de execução ("ok" e ela faz)
 Em cada atividade pendente do painel há "⚡ preparar execução": a assistente monta um plano (mensagem pronta para a pessoa certa no WhatsApp, compromisso, lembrete, nota, baixa na atividade) e mostra o cartão. Você responde **ok** (ou clica em "Ok, pode fazer") e o app executa: digita e envia a mensagem na conversa pelo WhatsApp que está dentro do app, cria o compromisso (vai para a Google Agenda se conectada), anota e dá baixa. Nada é enviado sem o seu ok. Quando você diz "Sim" num cartão "fulano te perguntou", a resposta já vem pronta para o ok. O manual (pendentes com seus planos, planos executados, concluídas) fica em `WhatsApp v1/Atividades.md` no Drive.
 
+## 🎤 Áudios do WhatsApp viram texto (computador)
+O Claude não recebe áudio, então a transcrição usa outro serviço, com a sua chave. Recomendado: **Groq** (modelo Whisper large v3 turbo). Cadastro único:
+1. Abra https://console.groq.com e entre (Google serve).
+2. Menu **API Keys** → **Create API Key** → nome "WhatsApp v1" → copie a chave (começa com `gsk_`).
+3. No app: ⚙️ Configurações → **🎤 Áudios do WhatsApp viram texto** → deixe "Groq (recomendado)", cole a chave → Salvar.
+
+Como funciona:
+- **Áudio que você toca** no WhatsApp vira texto sozinho e passa pela triagem como qualquer mensagem (pedido, pergunta, promessa, compromisso).
+- **Áudio novo que você ainda não ouviu** (até 36 h, de outra pessoa) aparece no chat da assistente com **🎤 Transcrever** / **Sempre, sozinha** / **Agora não**. Para transcrever, o app abre a conversa, toca o áudio **sem som** e pausa; por isso quem mandou vê o áudio como ouvido. "Sempre, sozinha" liga o modo automático (também em Configurações), que só roda quando você não está mexendo no WhatsApp.
+- **Arquivo de áudio que você baixa** (ogg, mp3, m4a, wav) também vira texto.
+- O áudio e a transcrição (.txt) ficam no Drive, em `WhatsApp v1/<conversa>/`, e o texto entra no histórico `Conversas/<conversa>.md` com "🎤 (áudio 0:42)".
+- Custo (Groq, out/2026): tem plano gratuito com limite; acima dele, US$ 0,04 por hora de áudio, cobrança mínima de 10 s por áudio. Alternativa: OpenAI (gpt-4o-mini-transcribe), com chave da OpenAI.
+
+## 📊 Resumo da semana (sexta às 17 h)
+Toda sexta às 17 h (se o PC estava desligado, sai até segunda à tarde) a assistente monta o resumo da semana **por obra/contrato**: ✅ feito, ⏳ pendente (com "ATRASADA"), 📨 esperando terceiros (o que você pediu e não veio) e 📅 próxima semana, com até 4 pontos de atenção. Fica em `WhatsApp v1/Resumos semanais/Semana AAAA-MM-DD a AAAA-MM-DD.md` no Drive e aparece como cartão no chat (Ver resumo / Abrir no Drive). Peça a qualquer hora com **📊 Resumo da semana**. Desliga em ⚙️ Configurações → Resumo da semana. Ela só usa o que está registrado (atividades, agenda, conversas lidas e resumos do dia); o que não tem dado fica de fora.
+
 ## Google Agenda (computador) — cadastro único, uns 8 cliques
 O Google só deixa um programa mexer na sua agenda se ele estiver cadastrado na sua conta. É de graça e você faz uma vez:
 1. Abra https://console.cloud.google.com e entre com a conta Google da sua agenda.

@@ -128,7 +128,44 @@ ipcMain.handle('wv1:log-search', (_, { texto, conversa, limite }) => {
   hits.sort((a, b) => b.score - a.score || b.data.localeCompare(a.data));
   return hits.slice(0, limite || 40).map(({ score, ...h }) => h).sort((a, b) => a.data.localeCompare(b.data));
 });
-ipcMain.handle('wv1:doc-write', (_, { name, text }) => { try { fs.mkdirSync(baseDir(), { recursive: true }); fs.writeFileSync(path.join(baseDir(), clean(name) + '.md'), String(text || '')); return { ok: true }; } catch (e) { return { error: e.message }; } });
+ipcMain.handle('wv1:doc-write', (_, { name, text, dir }) => { try { const d = dir ? path.join(baseDir(), clean(dir)) : baseDir(); fs.mkdirSync(d, { recursive: true }); const f = path.join(d, clean(name) + '.md'); fs.writeFileSync(f, String(text || '')); return { ok: true, file: f }; } catch (e) { return { error: e.message }; } });
+ipcMain.handle('wv1:open-path', (_, f) => { const p = path.resolve(String(f || '')); if (!p.startsWith(path.dirname(baseDir())) && !p.startsWith(dlCurrent())) return { error: 'fora das pastas do app' }; shell.openPath(fs.existsSync(p) ? p : path.dirname(p)); return { ok: true }; });
+
+// áudios do WhatsApp viram texto: serviço compatível com /audio/transcriptions (Groq ou OpenAI), com a chave do próprio usuário.
+// O áudio fica guardado no Drive, na pasta da conversa, com a transcrição ao lado (.txt).
+const STT = {
+  groq: { url: 'https://api.groq.com/openai/v1/audio/transcriptions', model: 'whisper-large-v3-turbo' },
+  openai: { url: 'https://api.openai.com/v1/audio/transcriptions', model: 'gpt-4o-mini-transcribe' }
+};
+const AUDIO_EXT = { 'audio/ogg': '.ogg', 'audio/opus': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp3': '.mp3', 'audio/mp4': '.m4a', 'audio/x-m4a': '.m4a', 'audio/aac': '.m4a', 'audio/wav': '.wav', 'audio/x-wav': '.wav', 'audio/wave': '.wav', 'audio/webm': '.webm', 'audio/flac': '.flac', 'video/ogg': '.ogg' };
+function multipart(fields, file) {
+  const b = '----wv1' + crypto.randomBytes(12).toString('hex'), parts = [];
+  for (const [k, v] of Object.entries(fields)) if (v !== undefined && v !== '') parts.push(Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+  parts.push(Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: ${file.type}\r\n\r\n`), file.data, Buffer.from(`\r\n--${b}--\r\n`));
+  return { body: Buffer.concat(parts), type: 'multipart/form-data; boundary=' + b };
+}
+ipcMain.handle('wv1:stt', async (_, { provider, key, buf, file, type, chat, when, prompt, save }) => {
+  try {
+    const p = STT[provider] || STT.groq;
+    if (!key) return { error: 'falta a chave do serviço de transcrição (Configurações)' };
+    const data = buf ? Buffer.from(buf) : fs.readFileSync(file);
+    if (!data.length) return { error: 'áudio vazio' };
+    if (data.length > 25e6) return { error: 'áudio maior que 25 MB' };
+    const mime = String(type || '').split(';')[0].trim().toLowerCase();
+    let ext = file ? path.extname(file).toLowerCase() : (AUDIO_EXT[mime] || '.ogg');
+    if (ext === '.opus') ext = '.ogg';
+    let keep = '';
+    if (buf && save !== false) { try { keep = targetPath(chat, 'áudio' + ext, when ? new Date(when) : null); fs.writeFileSync(keep, data); } catch (e) { console.warn('áudio no Drive:', e.message); keep = ''; } }
+    const EXT_MIME = { '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.mpga': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.flac': 'audio/flac', '.webm': 'audio/webm' };
+    const mp = multipart({ model: p.model, language: 'pt', prompt: String(prompt || '').slice(0, 800), response_format: 'json', temperature: '0' }, { name: 'audio' + ext, type: mime || EXT_MIME[ext] || 'application/octet-stream', data });
+    const r = await net.fetch(p.url, { method: 'POST', headers: { authorization: 'Bearer ' + key, 'content-type': mp.type }, body: mp.body });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return { error: (d.error && (d.error.message || d.error)) || ('HTTP ' + r.status), status: r.status };
+    const text = String(d.text || '').trim();
+    if (keep) { try { fs.writeFileSync(keep.slice(0, -ext.length) + '.txt', text + '\n'); } catch {} }
+    return { text, file: keep };
+  } catch (e) { return { error: e.message }; }
+});
 ipcMain.handle('wv1:notes-save', (_, { text }) => { try { fs.mkdirSync(baseDir(), { recursive: true }); fs.writeFileSync(path.join(baseDir(), 'Notas.md'), '# Notas importantes\n\n' + String(text || '') + '\n'); } catch (e) { console.warn('notas:', e.message); } });
 ipcMain.handle('wv1:summary-recent', (_, { dias, max }) => { // últimos dias de resumos, para a assistente já saber sem procurar
   try {
@@ -347,7 +384,7 @@ app.whenReady().then(() => {
   waSes.on('will-download', (_, item) => toDownloads(item, f => {
     let copy = '';
     try { copy = targetPath(currentChat, path.basename(f)); fs.copyFileSync(f, copy); } catch (e) { console.warn('cópia no Drive:', e.message); }
-    saved(copy || f, { downloads: f, name: path.basename(f) });
+    saved(copy || f, { downloads: f, name: path.basename(f), chat: currentChat });
   }));
   // backup e .ics do próprio app vão para a mesma pasta
   session.defaultSession.on('will-download', (_, item) => toDownloads(item, f => saved(f, { downloads: f, name: path.basename(f), appFile: true })));
