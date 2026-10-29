@@ -211,6 +211,11 @@ async function sendTo(chat, text) {
   }
   return { ok: false, erro: 'não confirmei o envio; confira na conversa ' + chatName() };
 }
+ipcRenderer.on('wa-open', async (_, o) => { // o Cérebro pediu para abrir a conversa (botão 💬 Abrir)
+  o = o || {}; if (sweeping) { cancel = true; for (let i = 0; i < 40 && sweeping; i++) await sleep(250); }
+  let ok = false; try { ok = await findAndOpen(o.chat); } catch {}
+  ipcRenderer.sendToHost('wa-opened', { chat: o.chat, ok: !!ok });
+});
 ipcRenderer.on('wa-send', async (_, o) => { o = o || {}; let r; try { r = await sendTo(o.chat, o.text); } catch (e) { r = { ok: false, erro: e.message }; } ipcRenderer.sendToHost('wa-sent', { id: o.id, ...r }); });
 
 // ---------- áudios ----------

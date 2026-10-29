@@ -1,7 +1,7 @@
 {
-  "ui": "1.8.5",
-  "desktop": "1.8.4",
-  "notes": "O texto do áudio aparece dentro da conversa, embaixo do balão: botão 🎤 Transcrever em cada áudio (também ao tocar ou usar Baixar). Precisa da chave da Groq em Configurações.",
+  "ui": "1.9.0",
+  "desktop": "1.9.0",
+  "notes": "🧠 Cérebro no meio do painel: vai narrando o que chega no WhatsApp (\"Kaleu mandou… tem isso para agendar\"), com Agendar / Responder / Abrir, e um \"Agora\" com as prioridades e o porquê. Painel mais largo (arraste a borda). Voz e reserva pela OpenAI (opcional). Leitura automática corrigida para o Claude 5.5.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",
@@ -15,5 +15,5 @@
     "icons/tray.png"
   ],
   "installerUrl": "https://raw.githubusercontent.com/tiagoabepplercivil-ai/whatsapp-v1/installer/WhatsApp-v1-Instalador.exe",
-  "sha256": "aa4c887cb8775b78d1f5ddd7199327b36bdce3456e616a538bd8763cccd46acd"
+  "sha256": "4864aef85849ff1ee1c45de9f40426bfac7a26a601b13ada5c37328f80501f78"
 }

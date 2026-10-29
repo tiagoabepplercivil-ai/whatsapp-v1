@@ -304,7 +304,57 @@ input,textarea,select{font:inherit;color:var(--text)}
 .pri{display:inline-block;background:#ea0038;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;text-transform:uppercase;vertical-align:middle}
 .todo-i .ok{background:#d9fdd3;color:#008069}
 .todo-i .no{background:var(--panel);color:var(--muted)}
-@media (min-width:900px){ .cal.side{width:380px} }
+@media (min-width:900px){ .cal.side{width:var(--sideW,480px);position:relative} }
+/* divisória para arrastar a largura do painel (fica guardada) */
+.sideGrip{display:none}
+@media (min-width:900px){ .sideGrip{display:block;position:absolute;left:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:60} .sideGrip:hover,.sideGrip.on{background:rgba(0,168,132,.35)} }
+.dragcover{position:fixed;inset:0;z-index:9999;cursor:col-resize}
+/* 🧠 Cérebro no meio do painel; a conversa com a assistente fica na outra aba */
+.sidetabs{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg);border-bottom:1px solid var(--line);flex:none}
+.sidetabs button{padding:5px 12px;border-radius:16px;font-size:13px;font-weight:600;color:var(--muted)}
+.sidetabs button.on{background:#d9fdd3;color:#0b3d1e}
+.sidetabs button i{font-style:normal;background:#25d366;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:2px}
+.sidetabs .vt{margin-left:auto;font-size:16px;padding:4px 8px}
+.think{font-weight:400;font-size:12px;color:var(--teal);animation:thk 1.2s ease-in-out infinite}
+@keyframes thk{50%{opacity:.35}}
+.side.vchat .brain{display:none}
+.side:not(.vchat) #sideMsgs{display:none}
+.brain{flex:1;min-height:0;overflow-y:auto;background-color:var(--chatbg);padding:8px 0 10px}
+.bnow{margin:2px 10px 10px;background:var(--card);border-radius:10px;box-shadow:0 1px .5px rgba(11,20,26,.13);padding:10px 12px;border-top:3px solid #7c3aed}
+.bnow .bh{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.bnow .bh b{color:#7c3aed;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.bnow .bs{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bnow .bb button{font-size:15px;padding:2px 6px;border-radius:12px}
+.bnow .bb button:hover{background:var(--panel)}
+.bnow .man{font-size:15px;line-height:1.45;margin:6px 0 4px}
+.bnow .man.mu{color:var(--muted);font-size:13.5px}
+.pr{display:flex;gap:8px;padding:8px 0 4px;border-top:1px solid var(--line)}
+.pr .n{flex:none;font-size:11px;padding-top:3px}
+.pr .pb{flex:1;min-width:0}
+.pr .pt2{font-weight:600;font-size:14px;line-height:1.3}
+.pr .why{font-size:12.5px;color:var(--muted);line-height:1.4;margin-top:1px}
+.bcx{font-size:12.5px;color:#7c3aed;line-height:1.45;padding-top:8px;border-top:1px solid var(--line);margin-top:4px}
+.fa{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.fa button{font-size:12.5px;font-weight:600;color:var(--teal);background:var(--panel);border-radius:14px;padding:3px 10px}
+.fa button.ok{background:#d9fdd3;color:#0b3d1e}
+.fa button.x{color:var(--muted);padding:3px 8px}
+.fa button:hover{filter:brightness(.96)}
+.fe{display:flex;gap:8px;margin:0 10px 6px;background:var(--card);border-radius:8px;padding:8px 10px;box-shadow:0 1px .5px rgba(11,20,26,.13);border-left:3px solid transparent}
+.fe .tm{flex:none;width:36px;font-size:11px;color:var(--muted);padding-top:2px}
+.fe .fb{flex:1;min-width:0}
+.fe .fh{font-size:12px;font-weight:700;color:#b45309;margin-bottom:2px}
+.fe .tx{font-size:14px;line-height:1.42;white-space:pre-wrap;word-wrap:break-word}
+.fe .sb{font-size:12px;color:var(--muted);margin-top:2px;white-space:pre-wrap}
+.fe.alta{border-left-color:#ea0038}
+.fe.alta .fh{color:#ea0038}
+.fe.k-pulse{border-left-color:#7c3aed}
+.fe.k-brief .tx{font-size:13.5px}
+.fe.off{opacity:.55;box-shadow:none}
+.fe.fresh{animation:fresh 2.5s ease-out}
+@keyframes fresh{0%{background:#d9fdd3}100%{background:var(--card)}}
+.fe .more2{font-size:12px;color:var(--teal);font-weight:600;padding:2px 0}
+.bempty{margin:20px 18px;color:var(--muted);font-size:13.5px;text-align:center}
+@media (prefers-color-scheme: dark){ .sidetabs button.on,.fa button.ok{background:#0a332c;color:#00a884} .bnow .bh b,.bcx{color:#a78bfa} .bnow{border-top-color:#a78bfa} @keyframes fresh{0%{background:#0a332c}100%{background:var(--card)}} }
 </style>
 </head>
 <body>
@@ -365,9 +415,12 @@ input,textarea,select{font:inherit;color:var(--text)}
 </div>
 <div class="calscrim" id="calScrim"></div>
 <aside class="cal side" id="cal">
+  <div class="sideGrip" id="sideGrip" title="Arraste para mudar a largura (duplo clique volta ao padrão)"></div>
   <header class="top"><div class="row"><div class="who"><div class="av" style="background:#d97757;width:38px;height:38px;font-size:15px">✳</div><div style="min-width:0"><div class="n">Assistente</div><div class="st" id="sideStatus">online</div></div></div><button class="icon-btn notesbtn" id="notesBtn" title="Notas importantes"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg><i class="dot" id="notesDot"></i></button><button class="icon-btn closecal" id="calClose"><svg viewBox="0 0 24 24"><path d="M19 6.4L17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg></button></div></header>
   <div class="notes" id="notes"><div class="notes-h"><b>Notas importantes</b><button id="notesToggle" title="Fechar">✕</button></div><textarea id="notesText" rows="3" placeholder="Anote aqui o que não pode esquecer (endereços, números de contrato, combinados). A assistente também escreve aqui."></textarea></div>
   <div class="ptasks" id="ptasks"></div>
+  <div class="sidetabs" id="sideTabs"></div>
+  <div class="brain" id="brain"></div>
   <div class="msgs" id="sideMsgs"></div>
   <div class="compose"><div class="box"><textarea id="sideInput" rows="1" placeholder="Escreva para a assistente"></textarea></div><button class="send" id="sideSend"><svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button></div>
 </aside>

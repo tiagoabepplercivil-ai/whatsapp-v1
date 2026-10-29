@@ -28,6 +28,7 @@ let db;
 try { db = JSON.parse(localStorage.getItem(KEY)) || seed(); } catch { db = seed(); }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { toast('Memória cheia: faça um backup e limpe conversas antigas'); } };
 db.meta = db.meta || {};
+db.brain = db.brain || { feed: [], pulse: null, voice: false, off: {} }; db.brain.off = db.brain.off || {};
 { const a = db.chats.find(c => c.id === 'claude'); if (a && a.name === 'Claude') { a.name = 'Assistente'; a.messages.push({ id: uid(), from: 'them', ts: new Date().toISOString(), text: INTRO }); } }
 db.chats.forEach(c => { if (c.kind !== 'claude' && c.watch === undefined) c.watch = true; });
 
@@ -273,11 +274,12 @@ function chatStatus(c) {
 function closeChat() { openChatId = null; $('#chat').classList.remove('open'); render(); }
 
 // nada sai da lista de atividades sem o Sim dele: a assistente pergunta "Isso foi feito?" (cartão) e o quadradinho pede confirmação
-function askDone(id, motivo, force) {
+function askDone(id, motivo, force, where) {
   const t = db.tasks.find(x => x.id === id); if (!t || t.done || t.askDone) return false;
   if (!force && t.doneNo && Date.now() - t.doneNo < 24 * 3600e3) return false; // ele disse "ainda não" há menos de 24 h
   t.askDone = true;
-  pushMsg('claude', { from: 'them', card: { type: 'done?', id, motivo: motivo || '', status: 'pendente' } });
+  if (where === 'brain') brainAdd({ kind: 'done?', key: 'd:' + id, taskId: id, icon: '❓', text: 'Parece que já foi feito: ' + t.title + '. Foi?', sub: motivo || '' });
+  else pushMsg('claude', { from: 'them', card: { type: 'done?', id, motivo: motivo || '', status: 'pendente' } });
   return true;
 }
 function doneAnswer(id, yes) {
@@ -389,7 +391,7 @@ function ptRow(t) {
   const sub = [when, src && src.name].filter(Boolean).join(' · ');
   const soon = !late && soonInfo(t.remindAt || t.due);
   const wait = db.plans.some(p => p.taskId === t.id && p.status === 'aguardando_ok');
-  const subHtml = t.askDone ? '<div class="s ask">❓ foi feito? confirme no chat</div>'
+  const subHtml = t.askDone ? `<div class="s ask">❓ foi feito? confirme ${brainFind(f => f.kind === 'done?' && f.taskId === t.id) ? 'no Cérebro' : 'na Conversa'}</div>`
     : sub ? `<div class="s ${late ? 'late' : soon ? 'soon' + (soon.hot ? ' hot' : '') : ''}">${late ? 'atrasada · ' : soon ? '⏳ ' + soon.txt + ' · ' : ''}${esc(sub)}</div>` : '';
   return `<div class="pt"><input type="checkbox" data-toggle="${t.id}" ${t.done ? 'checked' : ''}><div class="t" data-task="${t.id}"><div class="tt">${esc(t.title)}</div>${subHtml}</div>`
     + (wait ? '<span class="pa wait" title="Plano pronto, aguardando seu ok no chat">🗂</span>' : `<button class="pa" data-act="task-plan" data-id="${t.id}" title="Preparar execução (deixo a mensagem pronta, marco, anoto)">⚡</button>`) + '</div>';
@@ -409,7 +411,7 @@ function renderPTasks() {
   const closed = !!db.meta.ptasksClosed, show = items.slice(0, 10), sug = (db.inbox || []).length;
   box.classList.toggle('closed', closed);
   box.innerHTML = `<div class="todo-h"><b class="lk"><button data-view="agenda" title="Abrir a agenda">Agenda</button> e <button data-view="tasks" title="Abrir todas as atividades">atividades · ${pend.length}</button></b><span><button data-act="ptasks-toggle" title="Recolher/abrir">${closed ? '▸' : '▾'}</button></span></div>`
-    + (sug > 1 ? `<div class="sugbar"><span>💡 ${sug} coisas novas esperando sua resposta no chat</span><button data-act="inbox-all">Sim para todas</button></div>` : '')
+    + (sug > 1 ? `<div class="sugbar"><span>💡 ${sug} coisas novas esperando seu Sim no Cérebro</span><button data-act="inbox-all">Sim para todas</button></div>` : '')
     + (items.length ? show.map(x => x.h()).join('') + (items.length > show.length ? `<button class="more" data-view="tasks">+ ${items.length - show.length} mais adiante</button>` : '') : '<div class="sugbar"><span>Nada agendado nem pendente.</span></div>');
 }
 function renderSide() {
@@ -418,14 +420,14 @@ function renderSide() {
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   box.innerHTML = msgsHtml({ ...c, messages: c.messages.slice(-60) }, false); hydrateImgs(box);
   if (atBottom || !renderSide.done) box.scrollTop = box.scrollHeight; renderSide.done = true;
-  if (sideVisible() && !document.hidden && c.unread) { c.unread = 0; save(); }
-  renderPTasks();
+  if (sideVisible() && sideView() === 'chat' && !document.hidden && c.unread) { c.unread = 0; save(); }
+  renderPTasks(); renderBrain();
   $('#sideStatus').textContent = waSweeping ? (waSweepFull ? 'lendo todas as conversas…' : 'abrindo as conversas não lidas…') : audN > 0 ? 'transcrevendo áudio…' : weekBusy ? 'montando o resumo da semana…' : reading || waBusy ? 'lendo mensagens…' : (DESK && db.settings.waRead !== false ? 'lendo seu WhatsApp' : 'online');
 }
 function pushMsg(chatId, msg) {
   const c = db.chats.find(x => x.id === chatId);
   const m = { id: uid(), ts: new Date().toISOString(), ...msg }; c.messages.push(m);
-  const seen = !document.hidden && ((openChatId === chatId && tab !== 'wa') || (chatId === 'claude' && sideVisible()));
+  const seen = !document.hidden && ((openChatId === chatId && tab !== 'wa') || (chatId === 'claude' && sideVisible() && sideView() === 'chat'));
   if (m.from === 'them' && !m.pending && !seen) c.unread = (c.unread || 0) + 1;
   save();
   if (openChatId === chatId) renderMsgs();
@@ -584,24 +586,85 @@ Use as ferramentas para marcar compromissos, criar e vincular atividades. Interp
 Próximos compromissos:\n${up}\nAtividades e lembretes pendentes:\n${pend}`;
 }
 
-async function callClaude({ system, messages, tools, postTo, srcId, silentText }) {
+async function callClaude({ system, messages, tools, postTo, srcId, silentText, onText }) {
   for (let step = 0; step < 8; step++) {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': db.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: db.settings.model || 'claude-sonnet-5-5', max_tokens: 1500, system, tools, messages })
+      body: JSON.stringify({ model: aiModel(), max_tokens: 4000, system, tools, messages, ...effortCfg('medium') })
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data?.error?.message || ('HTTP ' + r.status));
     const txt = data.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
     const uses = data.content.filter(b => b.type === 'tool_use');
     const show = txt && !(silentText && /^NADA\b/i.test(txt));
-    if (show) pushMsg(postTo, { from: 'them', text: txt });
+    if (show) { if (onText) onText(txt); else pushMsg(postTo, { from: 'them', text: txt }); }
     if (!uses.length) return;
     const results = await Promise.all(uses.map(async u => ({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(await runTool(u.name, u.input || {}, postTo, srcId)) })));
     messages = [...messages, { role: 'assistant', content: data.content }, { role: 'user', content: results }];
   }
 }
+
+// ---------- IA em JSON: Claude primeiro; se ele falhar e houver chave, a OpenAI de reserva ----------
+// Os modelos Claude 5.5 não aceitam tool_choice forçado (dá erro 400): o JSON sai por output_config.format (structured outputs).
+const aiModel = () => db.settings.model || 'claude-sonnet-5-5';
+const effortCfg = e => /claude-(opus|sonnet|haiku|fable|mythos)-5/.test(aiModel()) ? { output_config: { effort: e } } : {};
+const claudeHeaders = () => ({ 'content-type': 'application/json', 'x-api-key': db.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' });
+function strictSchema(x) { // structured outputs: todo objeto fechado (additionalProperties false) e com todos os campos obrigatórios
+  if (Array.isArray(x)) return x.map(strictSchema);
+  if (!x || typeof x !== 'object') return x;
+  const o = {};
+  for (const [k, v] of Object.entries(x)) o[k] = k === 'properties' ? Object.fromEntries(Object.entries(v).map(([pk, pv]) => [pk, strictSchema(pv)])) : strictSchema(v);
+  if (o.type === 'object' && o.properties) { o.additionalProperties = false; o.required = Object.keys(o.properties); }
+  return o;
+}
+async function claudeJson({ system, user, schema, max, effort }) {
+  const cfg = effortCfg(effort || 'medium');
+  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: claudeHeaders(),
+    body: JSON.stringify({ model: aiModel(), max_tokens: max || 8000, system, messages: [{ role: 'user', content: user }], output_config: { ...(cfg.output_config || {}), format: { type: 'json_schema', schema: strictSchema(schema) } } }) });
+  const data = await r.json(); if (!r.ok) throw new Error(data?.error?.message || ('HTTP ' + r.status));
+  if (data.stop_reason === 'max_tokens') throw new Error('a resposta da IA veio cortada');
+  const txt = (data.content || []).find(b => b.type === 'text')?.text; if (!txt) throw new Error('a IA não respondeu');
+  return JSON.parse(txt);
+}
+function oaOn() { return !!(db.settings.oaKey || '').trim(); }
+const blobToDataUrl = b => new Promise((res, rej) => { const f = new FileReader(); f.onload = () => res(f.result); f.onerror = rej; f.readAsDataURL(b); });
+async function oaCall(path, body) { // no computador passa pelo processo principal (sem CORS); no celular vai direto
+  const key = (db.settings.oaKey || '').trim();
+  if (window.wv1desk && window.wv1desk.openai) { const r = await window.wv1desk.openai({ key, path, body }); if (!r || r.error) throw new Error((r && r.error) || 'falhou'); return r; }
+  const r = await fetch('https://api.openai.com/v1/' + path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify(body) });
+  if (!r.ok) { let m = 'HTTP ' + r.status; try { m = (await r.json()).error.message || m; } catch {} throw new Error(m); }
+  return path === 'audio/speech' ? { audio: await blobToDataUrl(await r.blob()) } : { json: await r.json() };
+}
+async function openaiJson({ system, user, schema, max }) {
+  const r = await oaCall('chat/completions', { model: db.settings.oaModel || 'gpt-5.4-mini', max_completion_tokens: Math.max(max || 8000, 8000), messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+    response_format: { type: 'json_schema', json_schema: { name: 'saida', strict: true, schema: strictSchema(schema) } } });
+  const txt = r.json?.choices?.[0]?.message?.content; if (!txt) throw new Error('a OpenAI não respondeu');
+  return JSON.parse(txt);
+}
+async function aiJson(o) {
+  let err; aiJson.last = 'claude';
+  if (db.settings.apiKey) { try { return await claudeJson(o); } catch (e) { err = e; console.warn('Claude:', e.message); } }
+  if (oaOn() && db.settings.oaBackup !== false) { try { const r = await openaiJson(o); aiJson.last = 'openai'; return r; } catch (e) { console.warn('OpenAI:', e.message); err = err || e; } }
+  throw err || new Error('sem chave da IA');
+}
+// voz: OpenAI (natural) se houver chave; senão a voz do Windows/celular em português
+let voiceQ = Promise.resolve(), voiceAudio = null;
+function speak(text) {
+  text = String(text || '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 900); if (!text) return;
+  voiceQ = voiceQ.then(() => speak1(text)).catch(() => {});
+}
+async function speak1(text) {
+  if (oaOn() && db.settings.oaVoice !== false) {
+    try {
+      const r = await oaCall('audio/speech', { model: 'gpt-4o-mini-tts', voice: db.settings.oaVoiceName || 'marin', input: text, instructions: 'Fale em português do Brasil, como uma secretária experiente: natural, clara e num ritmo um pouco rápido.', response_format: 'mp3' });
+      await new Promise(res => { const a = new Audio(r.audio); voiceAudio = a; a.onended = a.onerror = res; a.play().catch(res); setTimeout(res, 90e3); }); return;
+    } catch (e) { console.warn('voz OpenAI:', e.message); }
+  }
+  if (!('speechSynthesis' in window)) return;
+  await new Promise(res => { const u = new SpeechSynthesisUtterance(text); u.lang = 'pt-BR'; const v = speechSynthesis.getVoices().find(x => /^pt[-_]BR/i.test(x.lang)); if (v) u.voice = v; u.rate = 1.05; u.onend = u.onerror = res; speechSynthesis.speak(u); setTimeout(res, 60e3); });
+}
+function shush() { try { speechSynthesis.cancel(); } catch {} if (voiceAudio) { try { voiceAudio.pause(); } catch {} voiceAudio = null; } voiceQ = Promise.resolve(); }
 
 // assistente lendo as conversas
 const READ_TOOLS = () => [...TOOLS.filter(t => t.name !== 'excluir_compromisso'), { name: 'registrar_descricao', description: 'Guarda a descrição/transcrição de uma FOTO para buscas futuras. Chame UMA vez para cada foto recebida, transcrevendo nomes, datas, números, locais e o tipo de documento.',
@@ -811,6 +874,16 @@ function settingsSheet() {
       <input id="sTk" type="password" value="${esc(s.sttKey || '')}" placeholder="Chave (Groq: gsk_…)" autocomplete="off" style="flex:1"></div>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sTa" ${s.sttAuto ? 'checked' : ''} style="width:auto"> Transcrever áudios novos sozinha, sem perguntar (quem mandou vê o áudio como ouvido)</label>
       <div class="hint">O áudio que você toca no WhatsApp vira texto e passa pela triagem; áudio novo que você ainda não ouviu aparece no chat com o botão Transcrever. A transcrição e o áudio ficam no Drive, na pasta da conversa. Chave da Groq: console.groq.com → API Keys → Create API Key (tem plano gratuito; acima do limite, US$ 0,04 por hora de áudio). O áudio vai para o serviço escolhido só para virar texto.</div></div>
+    <div class="field"><label>🧠 Cérebro</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400"><input type="checkbox" id="sBr" ${s.brain !== false ? 'checked' : ''} style="width:auto"> Pensar sozinho quando chegar coisa nova (no máximo a cada 15 min, e a cada 1 h 30 no horário de trabalho)</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sBv" ${db.brain.voice ? 'checked' : ''} style="width:auto"> Falar em voz alta quando chegar coisa importante (o botão 🔇/🔊 do painel também liga e desliga)</label>
+      <div class="hint">Cada vez que o Cérebro pensa é uma chamada à IA com o que chegou nas últimas 12 h, a agenda e as atividades (custo por uso da sua chave). ↻ no painel faz pensar na hora.</div></div>
+    <div class="field"><label>🤖 OpenAI (opcional)</label>
+      <input id="sOk" type="password" value="${esc(s.oaKey || '')}" placeholder="Chave da OpenAI (sk-…)" autocomplete="off">
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sOv" ${s.oaVoice !== false ? 'checked' : ''} style="width:auto"> Voz natural quando o Cérebro fala (voz gerada por IA da OpenAI; sem a chave uso a voz do Windows)</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sOb" ${s.oaBackup !== false ? 'checked' : ''} style="width:auto"> Reserva: se o Claude falhar ou ficar sem crédito, a leitura do WhatsApp, o Cérebro e o resumo da semana usam a OpenAI</label>
+      <input id="sOm" value="${esc(s.oaModel || 'gpt-5.4-mini')}" placeholder="Modelo de reserva" style="margin-top:6px">
+      <div class="hint">Crie a chave em platform.openai.com → API keys. Fica só neste aparelho. O Claude continua sendo o cérebro principal; a OpenAI entra na voz e quando o Claude não responde. Também transcreve áudios: em 🎤 Áudios escolha OpenAI (se a chave de lá estiver vazia, uso esta).</div></div>
     <div class="field"><label>📊 Resumo da semana</label>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400"><input type="checkbox" id="sWk" ${s.weekly !== false ? 'checked' : ''} style="width:auto"> Toda sexta às 17 h, por obra: feito, pendente e esperando terceiros (salvo no Drive, em WhatsApp v1/Resumos semanais)</label></div>
     <div class="field"><label>Sobre você e seu trabalho</label><textarea id="sP" rows="3">${esc(s.profile || '')}</textarea><div class="hint">Ajuda a assistente a entender o que é com você nas mensagens.</div></div>
@@ -918,7 +991,33 @@ document.addEventListener('click', async e => {
     case 'upd-later': if ($('#updBar')) $('#updBar').style.display = 'none'; break;
     case 'ptasks-toggle': db.meta.ptasksClosed = !db.meta.ptasksClosed; save(); renderPTasks(); break;
     case 'inbox-ok': case 'sug-yes': if (db.inbox.some(x => x.id === id)) acceptInbox(id); else { sugResolve(id, 'descartada'); save(); renderSide(); } break;
-    case 'inbox-no': case 'sug-no': db.inbox = db.inbox.filter(x => x.id !== id); sugResolve(id, 'descartada'); save(); renderSide(); render(); break;
+    case 'inbox-no': case 'sug-no': db.inbox = db.inbox.filter(x => x.id !== id); sugResolve(id, 'descartada'); brainResolve(id, 'off'); save(); renderSide(); render(); break;
+    case 'side-view': setSideView(id); break;
+    case 'brain-think': brainThink(true); break;
+    case 'brain-say': { const p = db.brain.pulse; if (!p) break; shush(); speak([p.manchete, ...brainPrios().slice(0, 3).map(x => x.titulo + '. ' + (x.porque || ''))].join(' ')); break; }
+    case 'brain-voice': db.brain.voice = !db.brain.voice; save(); renderBrain(); if (!db.brain.voice) shush(); toast(db.brain.voice ? '🔊 Vou falar em voz alta quando chegar coisa importante' : '🔇 Voz desligada'); break;
+    case 'brain-more': { const f = brainFind(x => x.id === id); if (f) { f.open = !f.open; save(); renderBrain(); } break; }
+    case 'brain-open': { const f = brainFind(x => x.id === id); if (f && f.chat) waOpen(f.chat); break; }
+    case 'brain-acc': { const f = brainFind(x => x.id === id); if (f && db.inbox.some(x => x.id === f.sugId)) acceptInbox(f.sugId); break; }
+    case 'brain-no': { const f = brainFind(x => x.id === id); if (f) { db.inbox = db.inbox.filter(x => x.id !== f.sugId); f.st = 'off'; sugResolve(f.sugId, 'descartada'); save(); render(); } break; }
+    case 'brain-reply': {
+      const f = brainFind(x => x.id === id), it = f && db.inbox.find(x => x.id === f.sugId); if (!it) break;
+      if (!db.settings.apiKey) { toast('Para eu preparar a resposta, configure a chave do Claude em Configurações'); break; }
+      db.inbox = db.inbox.filter(x => x.id !== it.id); f.st = 'ok'; sugResolve(it.id, 'descartada'); save();
+      brainPlan({ acao: 'responder', titulo: it.titulo, porque: [it.pessoa, it.trecho && '“' + it.trecho.slice(0, 200) + '”'].filter(Boolean).join(': '), conversa: it.conversa }); break;
+    }
+    case 'brain-snooze': {
+      const f = brainFind(x => x.id === id), t = f && db.tasks.find(x => x.id === f.taskId); if (!t) break;
+      t.remindAt = localISO(new Date(Date.now() + 3600e3)); t.notified = false; f.head = '⏰ Adiado'; f.sub = 'lembro de novo às ' + fmtHour(t.remindAt); save(); render(); toast('Lembro de novo às ' + fmtHour(t.remindAt)); break;
+    }
+    case 'pr-plan': case 'pr-task': case 'pr-open': case 'pr-off': {
+      const x = brainPrios().find(p => p.chave === id); if (!x) break;
+      if (d.act === 'pr-plan') brainPlan(x);
+      else if (d.act === 'pr-task') { addTask({ title: x.titulo, chatId: 'claude' }); db.brain.off[x.chave] = Date.now(); save(); render(); toast('Virou atividade ✓'); }
+      else if (d.act === 'pr-open') waOpen(x.conversa);
+      else { db.brain.off[x.chave] = Date.now(); save(); renderBrain(); }
+      break;
+    }
     case 'inbox-all': [...db.inbox].forEach(x => acceptInbox(x.id, true)); render(); break;
     case 'aud-go': case 'aud-auto': {
       const m = audCards().find(x => x.card.id === id); if (!m) break;
@@ -964,11 +1063,13 @@ document.addEventListener('click', async e => {
       if ($('#sD') && dlInfo && $('#sD').value.trim() !== dlInfo.dir) { const v = $('#sD').value.trim(); window.wv1desk.dlSet(v === dlInfo.def ? '' : v).then(r => { dlInfo = r; if (r.error) toast('⚠️ Pasta dos downloads: ' + r.error); }); }
       if ($('#gI')) { db.settings.gcalId = $('#gI').value.trim(); db.settings.gcalSecret = $('#gS').value.trim(); }
       if ($('#sAvD')) { db.settings.avisoDia = $('#sAvD').checked; db.settings.avisoHora = $('#sAvH').checked; }
+      if ($('#sOk')) { db.settings.oaKey = $('#sOk').value.trim(); db.settings.oaVoice = $('#sOv').checked; db.settings.oaBackup = $('#sOb').checked; db.settings.oaModel = $('#sOm').value.trim() || 'gpt-5.4-mini'; }
+      if ($('#sBr')) { db.settings.brain = $('#sBr').checked; db.brain.voice = $('#sBv').checked; }
       if ($('#sTk')) { db.settings.sttProvider = $('#sTp').value; db.settings.sttKey = $('#sTk').value.trim(); db.settings.sttAuto = $('#sTa').checked; db.settings.weekly = $('#sWk').checked; audCfg(); }
       db.settings.myName = $('#sN').value.trim(); db.settings.apiKey = $('#sK').value.trim(); db.settings.model = $('#sM').value.trim() || 'claude-sonnet-5-5';
       save(); closeSheet(); render(); if (openChatId) openChat(openChatId); toast('Salvo'); break;
     case 'export': {
-      const copy = { ...db, settings: { ...db.settings, apiKey: '', sttKey: '' } };
+      const copy = { ...db, settings: { ...db.settings, apiKey: '', sttKey: '', oaKey: '' } };
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(copy, null, 1)], { type: 'application/json' }));
       a.download = `whatsapp-v1-backup-${ymd(new Date())}.json`; a.click(); break;
     }
@@ -1036,11 +1137,21 @@ if ($('#notesText')) {
   $('#notesBtn')?.addEventListener('click', () => { db.meta.notesOpen = !db.meta.notesOpen; save(); renderNotes(); if (db.meta.notesOpen) $('#notesText').focus(); });
   renderNotes();
 }
+// painel da assistente mais largo, com divisória para arrastar (a largura fica guardada)
+function applySideW() { const w = Math.max(340, Math.min(db.meta.sideW || 480, Math.max(340, innerWidth - 560))); document.documentElement.style.setProperty('--sideW', w + 'px'); }
+applySideW(); addEventListener('resize', applySideW);
+$('#sideGrip')?.addEventListener('pointerdown', e => {
+  e.preventDefault(); const g = e.currentTarget, cover = document.createElement('div'); cover.className = 'dragcover'; document.body.appendChild(cover); g.classList.add('on');
+  const move = ev => { db.meta.sideW = Math.round(innerWidth - ev.clientX); applySideW(); };
+  const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); cover.remove(); g.classList.remove('on'); save(); };
+  addEventListener('pointermove', move); addEventListener('pointerup', up);
+});
+$('#sideGrip')?.addEventListener('dblclick', () => { db.meta.sideW = 480; applySideW(); save(); });
 $('#sideSend').addEventListener('click', () => sendSide());
 $('#sideInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSide(); } });
 async function sendSide() {
   const t = $('#sideInput').value.trim(); if (!t) return;
-  $('#sideInput').value = '';
+  $('#sideInput').value = ''; if (sideView() !== 'chat') setSideView('chat');
   pushMsg('claude', { from: 'me', text: t });
   if (/^(ok|okay|pode|pode sim|manda|vai|faz|confirmo|aprovado|pode mandar|pode fazer|ok pode)\s*[.!]*$/i.test(t) && db.plans.some(p => p.status === 'aguardando_ok')) { runPlan(db.plans.find(p => p.status === 'aguardando_ok').id); return; }
   if (/ler todo o whatsapp/i.test(t)) sweepNow(); else if (/^📖|ler todas as conversas/i.test(t)) await readAll(true); else if (WEEK_RE.test(t)) await weeklyReport({ manual: true }); else await askClaude(t);
@@ -1169,15 +1280,16 @@ function addInbox(it) {
   if (!key || db.inbox.some(x => x.titulo.toLowerCase() === key) || db.tasks.some(t => !t.done && t.title.toLowerCase() === key)) return;
   let quando = (it.quando || '').slice(0, 16), titulo = it.titulo;
   if (it.tipo === 'responder') { if (!/^respond/i.test(titulo)) titulo = 'Responder ' + (it.pessoa || it.conversa || '') + ': ' + titulo; if (quando.length < 16) quando = localISO(new Date(Date.now() + 2 * 3600e3)); }
-  const item = { id: uid(), origem: it.origem || (it.tipo === 'compromisso' ? 'compromisso' : 'pedido'), tipo: it.tipo || 'atividade', titulo, quando, conversa: it.conversa || '', pessoa: it.pessoa || '', prioridade: it.prioridade || 'media', motivo: it.motivo || '', trecho: it.trecho || '', ts: new Date().toISOString() };
+  const item = { id: uid(), origem: it.origem || (it.tipo === 'compromisso' ? 'compromisso' : 'pedido'), tipo: it.tipo || 'atividade', titulo, quando, conversa: it.conversa || '', pessoa: it.pessoa || '', prioridade: it.prioridade || 'media', motivo: it.motivo || '', trecho: it.trecho || '', fala: it.fala || '', ts: new Date().toISOString() };
   db.inbox.unshift(item);
   if (db.settings.waAuto) acceptInbox(item.id, true); else askInbox(item);
   return item;
 }
-// toda coisa nova vira um cartão no chat da assistente perguntando se entra como tarefa (Sim / Não)
-function askInbox(it) {
-  if (it.card) return; it.card = 1;
-  pushMsg('claude', { from: 'them', card: { type: 'sug', id: it.id, origem: it.origem, tipo: it.tipo, titulo: it.titulo, quando: it.quando, pessoa: it.pessoa, conversa: it.conversa, trecho: it.trecho, prioridade: it.prioridade, status: 'pendente' } });
+// toda coisa nova vira uma linha narrada no Cérebro ("Kaleu mandou…; tem isso para agendar") com Agendar / Virar tarefa / Responder
+function askInbox(it, quiet) {
+  if (brainFind(f => f.sugId === it.id)) return; it.card = 1;
+  const sub = [it.quando ? fmtDay(it.quando) + (it.quando.length > 10 ? ', ' + fmtHour(it.quando) : '') : '', it.conversa ? '💬 ' + it.conversa : ''].filter(Boolean).join(' · ');
+  brainAdd({ kind: 'sug', key: 's:' + it.id, sugId: it.id, icon: { compromisso: '📅', lembrete: '🔔', responder: '💬' }[it.tipo] || '✅', text: it.fala || sugFala(it), sub, chat: it.conversa || '', prio: it.prioridade === 'alta' ? 'alta' : 'media', ts: it.ts || new Date().toISOString(), quiet });
 }
 function sugMsg(id) { return db.chats.find(c => c.id === 'claude').messages.find(m => m.card && m.card.type === 'sug' && m.card.id === id); }
 function sugResolve(id, status, ref) { const m = sugMsg(id); if (!m) return false; m.card.status = status; if (ref) Object.assign(m.card, ref); return true; }
@@ -1187,11 +1299,13 @@ function acceptInbox(id, quiet) {
   const notes = it.conversa ? `Do WhatsApp (${it.conversa}): ${it.trecho}` : it.trecho;
   if (it.tipo === 'compromisso' && it.quando.length > 10) {
     const ev = addEvent({ title: it.titulo, start: it.quando, notes, chatId: 'claude' });
-    if (!sugResolve(id, 'aceita', { eventId: ev.id })) pushMsg('claude', { from: 'them', card: { type: 'event', id: ev.id } });
+    const a = sugResolve(id, 'aceita', { eventId: ev.id }), b = brainResolve(id, 'ok', { eventId: ev.id });
+    if (!a && !b) brainAdd({ kind: 'info', icon: '📅', text: 'Agendei: ' + it.titulo, sub: fmtWhen(ev), quiet: true });
   } else {
     const remindAt = it.tipo === 'lembrete' || it.tipo === 'responder' || it.quando.length > 10 ? (it.quando.length > 10 ? it.quando : (it.quando ? it.quando + 'T08:00' : '')) : '';
     const t = addTask({ title: it.titulo, due: it.quando.slice(0, 10), remindAt, chatId: 'claude' });
-    if (!sugResolve(id, 'aceita', { taskId: t.id })) pushMsg('claude', { from: 'them', card: { type: 'task', id: t.id, remind: !!remindAt } });
+    const a = sugResolve(id, 'aceita', { taskId: t.id }), b = brainResolve(id, 'ok', { taskId: t.id });
+    if (!a && !b) brainAdd({ kind: 'info', icon: '✅', text: 'Virou atividade: ' + it.titulo, quiet: true });
     if (it.tipo === 'responder' && !quiet && db.settings.apiKey) setTimeout(() => planForTask(t.id), 300); // já deixa a resposta pronta para o ok
   }
   save(); if (!quiet) render(); else renderSide();
@@ -1201,7 +1315,7 @@ async function flushWa() {
   const batch = waQueue.splice(0, 60); if (!batch.length) return;
   waBusy = true; renderSide();
   try {
-    if (!db.settings.apiKey) {
+    if (!db.settings.apiKey && !oaOn()) {
       for (const m of batch) { const p = parseBasic(m.text); if (p.date && p.hh !== null) { p.date.setHours(p.hh, p.mm, 0, 0); addInbox({ tipo: 'compromisso', titulo: p.title || m.text.slice(0, 60), quando: localISO(p.date), conversa: m.chat, trecho: m.text }); } }
     } else {
       const byChat = {}; batch.forEach(m => (byChat[m.chat] = byChat[m.chat] || []).push(m));
@@ -1212,10 +1326,7 @@ async function flushWa() {
       const pend = db.tasks.filter(t => !t.done).slice(0, 40).map(t => `- [${t.id}] ${t.title}${t.remindAt ? ' (' + t.remindAt + ')' : t.due ? ' (' + t.due + ')' : ''}`).join('\n');
       const sug = db.inbox.map(x => '- ' + x.titulo).join('\n');
       const now = new Date();
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': db.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: db.settings.model || 'claude-sonnet-5-5', max_tokens: 1500,
+      const out = await aiJson({ max: 8000, effort: 'medium',
           system: `Você é a secretária executiva de ${db.settings.myName || 'o usuário'}. Perfil dele: ${db.settings.profile || '(não informado)'}
 O que você já sabe (memória):\n${db.facts.slice(-60).map(f => '- ' + f).join('\n') || '(nada ainda)'}
 Você lê as mensagens novas do WhatsApp dele ("Eu" = ele) e age como uma secretária atenta e proativa:
@@ -1229,37 +1340,35 @@ Você lê as mensagens novas do WhatsApp dele ("Eu" = ele) e age como uma secret
 3) Aprenda: fatos úteis e duradouros sobre pessoas, obras, clientes e empresas (quem é quem, papéis, locais, prazos de contrato) vão em "fatos", uma frase curta cada, só se forem novos. Nada de saúde, política, fofoca ou dados sensíveis.
 4) Resuma: para cada conversa com novidade de trabalho (decisão, pedido, número, prazo, combinado), 1 a 3 frases objetivas em "resumos", mesmo sem ação para ele. Conversa só social não entra.
 5) Notas: informação de referência que ele vai querer consultar depois (endereço de obra, número de contrato/processo/ofício, valor combinado, código, horário fixo, decisão fechada) vai em "notas", uma frase curta e completa cada, só se for nova. Notas já existentes:\n${db.notes.trim().slice(-1500) || '(nenhuma)'}
+6) Narre, como quem conta em voz alta para ele: cada item tem "fala", uma frase curta que começa por quem mandou e diz o que fazer (ex.: "Kaleu mandou o cronograma da sondagem; tem a visita de sexta às 9h para agendar." / "O Alex perguntou se o financeiro já está rodando; está esperando sua resposta."). Em "novidades", até 4 coisas de trabalho que ele deve saber mesmo sem ação dele (documento ou foto de documento recebido, decisão, valor, mudança de data, alguém avisando que fez algo), no mesmo estilo de fala, com a conversa e a importância. Nada social nem repetido dos itens.
 Ignore conversa social, figurinhas, propaganda, correntes, avisos genéricos de grupo e o que não é com ele. Em grupos grandes, só o que o menciona ou cabe ao papel dele.
 Mensagens que começam com 🎤 são áudios transcritos automaticamente: nomes, números e termos técnicos podem ter saído errados na transcrição; entenda pela intenção e, no trecho, comece com "🎤".
 Prioridade: alta = prazo em até 24h, cliente ou órgão público cobrando, dinheiro, ou pergunta a ele sem resposta há mais de 2h; media = prazo nesta semana; baixa = o resto.
 Agora: ${localISO(now)} (${now.toLocaleDateString('pt-BR', { weekday: 'long' })}). Datas relativas contam a partir da hora de cada mensagem; sem hora, use só a data.
-Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '(nenhum)'}\nSugestões ainda não confirmadas (não repita):\n${sug || '(nenhuma)'}\nSe não houver nada novo, chame a ferramenta com listas vazias.`,
-          tools: [{ name: 'itens_a_fazer', description: 'Resultado da leitura', input_schema: { type: 'object', properties: {
+Pendentes já registrados (não repita; use os ids para dar baixa):\n${pend || '(nenhum)'}\nSugestões ainda não confirmadas (não repita):\n${sug || '(nenhuma)'}\nResponda só com o JSON pedido. Campo sem informação vai como texto vazio; se não houver nada novo, listas vazias.`,
+          user: txt, schema: { type: 'object', properties: {
             itens: { type: 'array', items: { type: 'object', properties: {
               origem: { type: 'string', enum: ['pedido', 'pergunta', 'promessa', 'compromisso'], description: 'Por que é com ele (triagem)' },
               tipo: { type: 'string', enum: ['compromisso', 'lembrete', 'atividade', 'responder'] }, titulo: { type: 'string', description: 'Ação curta e concreta, ex.: "Enviar laudo SPT ao Alex"; para responder: "Responder Alex: data da vistoria"' },
               quando: { type: 'string', description: 'YYYY-MM-DDTHH:MM ou YYYY-MM-DD; vazio se não houver' }, conversa: { type: 'string' }, pessoa: { type: 'string', description: 'Quem pediu/perguntou' },
-              prioridade: { type: 'string', enum: ['alta', 'media', 'baixa'] }, trecho: { type: 'string', description: 'Trecho da mensagem que originou' }, motivo: { type: 'string', description: 'Uma linha: por que isso importa' } }, required: ['origem', 'tipo', 'titulo', 'conversa', 'prioridade'] } },
-            concluidas: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, motivo: { type: 'string' } }, required: ['id'] } },
+              prioridade: { type: 'string', enum: ['alta', 'media', 'baixa'] }, trecho: { type: 'string', description: 'Trecho da mensagem que originou' }, motivo: { type: 'string', description: 'Uma linha: por que isso importa' },
+              fala: { type: 'string', description: 'Frase de narrador para ele: quem mandou + o que fazer' } } } },
+            novidades: { type: 'array', items: { type: 'object', properties: { conversa: { type: 'string' }, fala: { type: 'string' }, importancia: { type: 'string', enum: ['alta', 'media'] } } } },
+            concluidas: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, motivo: { type: 'string' } } } },
             fatos: { type: 'array', items: { type: 'string' } },
-            resumos: { type: 'array', items: { type: 'object', properties: { conversa: { type: 'string' }, resumo: { type: 'string' } }, required: ['conversa', 'resumo'] } },
-            notas: { type: 'array', items: { type: 'string' } } }, required: ['itens'] } }],
-          tool_choice: { type: 'tool', name: 'itens_a_fazer' },
-          messages: [{ role: 'user', content: txt }] })
-      });
-      const data = await r.json(); if (!r.ok) throw new Error(data?.error?.message || ('HTTP ' + r.status));
-      const use = data.content.find(b => b.type === 'tool_use'), out = use?.input || {};
+            resumos: { type: 'array', items: { type: 'object', properties: { conversa: { type: 'string' }, resumo: { type: 'string' } } } },
+            notas: { type: 'array', items: { type: 'string' } } } } });
       const novos = (out.itens || []).filter(it => ORIGENS[it.origem]).map(addInbox).filter(Boolean); // triagem: só o que é com ele
-      for (const c of out.concluidas || []) askDone(c.id, c.motivo ? 'Vi no WhatsApp: ' + c.motivo : 'Pelas mensagens do WhatsApp parece que já foi feito.'); // só sai da lista com o Sim dele
+      for (const c of out.concluidas || []) askDone(c.id, c.motivo ? 'Vi no WhatsApp: ' + c.motivo : 'Pelas mensagens do WhatsApp parece que já foi feito.', false, 'brain'); // só sai da lista com o Sim dele
+      for (const n of (out.novidades || []).slice(0, 5)) if (n && n.fala) brainAdd({ kind: 'info', icon: '💬', text: n.fala, chat: n.conversa || '', sub: n.conversa ? '💬 ' + n.conversa : '', prio: n.importancia === 'alta' ? 'alta' : 'media' });
       for (const f of out.fatos || []) { const k = String(f).trim(); if (k && k.length < 200 && !db.facts.some(x => x.toLowerCase() === k.toLowerCase())) db.facts.push(k); }
       if (db.facts.length > 80) db.facts.splice(0, db.facts.length - 80);
       const sums = (out.resumos || []).filter(r => r && r.conversa && r.resumo).map(r => `### ${fmtHour(localISO(now))} — ${r.conversa}\n${String(r.resumo).trim()}`);
       if (sums.length && DESK && db.settings.driveLog !== false) window.wv1desk.summaryAppend({ date: ymd(now), text: sums.join('\n\n') }).then(refreshSums).catch(() => {});
       // proativa: conta o que anotou e avisa na hora o que é urgente
-      const lines = [];
       const notas = (out.notas || []).filter(addNote);
-      if (notas.length) lines.push('📝 Anotei nas notas: ' + notas.join('; '));
-      if (lines.length) pushMsg('claude', { from: 'them', text: lines.join('\n\n') });
+      if (notas.length) brainAdd({ kind: 'note', icon: '📝', text: 'Anotei nas notas: ' + notas.join('; '), prio: 'baixa' });
+      if (novos.length || (out.novidades || []).length || (out.concluidas || []).length) brainSoon(15000); // o Cérebro repensa as prioridades
       const soon = localISO(new Date(Date.now() + 3 * 3600e3));
       novos.filter(n => n.prioridade === 'alta' || (n.quando.length > 10 && n.quando <= soon)).slice(0, 3).forEach(n => notify('📌 ' + n.titulo, (n.pessoa ? n.pessoa + ' · ' : '') + n.conversa));
     }
@@ -1287,7 +1396,8 @@ function createPlan(i, chatId) {
   db.plans.forEach(p => { if (p.status === 'aguardando_ok') p.status = 'cancelado'; }); // o plano novo substitui o que estava esperando
   const plan = { id: uid(), titulo: i.titulo || 'Plano', taskId: i.atividade_id || '', passos, status: 'aguardando_ok', criado: new Date().toISOString() };
   db.plans.unshift(plan); if (db.plans.length > 100) db.plans.length = 100;
-  save(); pushMsg(chatId || 'claude', { from: 'them', card: { type: 'plan', id: plan.id } }); render();
+  save(); pushMsg(chatId || 'claude', { from: 'them', card: { type: 'plan', id: plan.id } });
+  brainAdd({ kind: 'plan', key: 'p:' + plan.id, planId: plan.id, icon: '🗂', text: 'Deixei pronto: ' + plan.titulo + '. Confere e me dá o ok.', quiet: true }); render();
   return plan;
 }
 const waSendWaiters = {};
@@ -1399,7 +1509,8 @@ async function gcalPull() { // traz 7 dias para trás e 90 para a frente; o que 
 // ---------- áudios do WhatsApp: viram texto (Groq ou OpenAI, chave dele) e entram na leitura e na triagem como mensagem ----------
 const STT_NAMES = { groq: 'Groq (recomendado)', openai: 'OpenAI' };
 const STT_PROMPT = 'Áudio de WhatsApp em português do Brasil, trabalho de engenharia civil: SPT, CPTu, sondagem rotativa, CBUQ, Marshall, Benkelman, talude, recalque, aterro sanitário, ART, medição, aditivo, reequilíbrio, DNIT, ABNT, Trojan, NEV.';
-const sttOn = () => DESK && !!(db.settings.sttKey || '').trim() && db.settings.waRead !== false && !!(window.wv1desk && window.wv1desk.stt);
+const sttKeyNow = () => (db.settings.sttKey || '').trim() || (db.settings.sttProvider === 'openai' ? (db.settings.oaKey || '').trim() : '');
+const sttOn = () => DESK && !!sttKeyNow() && db.settings.waRead !== false && !!(window.wv1desk && window.wv1desk.stt);
 const fmtDur = s => s ? `${Math.floor(s / 60)}:${pad(Math.round(s % 60))}` : '';
 const audDone = new Set(db.meta.audioDone || []), audBusy = new Set(), audQueue = [], audWaiters = {};
 var audN = 0, audPumping = false; // var: o painel lê antes desta linha rodar
@@ -1472,7 +1583,7 @@ async function onWaAudio(a) {
   audBusy.add(key); audN++; renderSide();
   const t = a.meta ? waTs(a.meta) : { d: new Date(), who: '' };
   let r;
-  try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: db.settings.sttKey.trim(), buf: a.buf, type: a.type, chat: a.chat, when: t.d.toISOString(), prompt: STT_PROMPT }); }
+  try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: sttKeyNow(), buf: a.buf, type: a.type, chat: a.chat, when: t.d.toISOString(), prompt: STT_PROMPT }); }
   catch (e) { r = { error: e.message }; }
   audBusy.delete(key); audN--; renderSide();
   if (!r || r.error) { const erro = (r && r.error) || 'falhou'; audUpdate(a.id, { erro }); if (a.id) audTell({ id: a.id, erro }); else toast('🎤 Não transcrevi o áudio: ' + erro); return; }
@@ -1490,7 +1601,7 @@ async function onWaAudio(a) {
 async function audFile(d) {
   const key = 'f:' + d.downloads; if (audDone.has(key)) return;
   audN++; renderSide(); audTell({ recent: true, key, busy: true });
-  let r; try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: db.settings.sttKey.trim(), file: d.downloads, save: false, prompt: STT_PROMPT }); } catch (e) { r = { error: e.message }; }
+  let r; try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: sttKeyNow(), file: d.downloads, save: false, prompt: STT_PROMPT }); } catch (e) { r = { error: e.message }; }
   audN--; renderSide();
   if (!r || r.error) { audTell({ recent: true, key, erro: (r && r.error) || 'falhou' }); return toast('🎤 Não transcrevi ' + d.name + ': ' + ((r && r.error) || 'falhou')); }
   audMark(key); audKeep([key], r.text || '(sem fala reconhecível)'); audTell({ recent: true, key, text: r.text || '(sem fala reconhecível)' });
@@ -1548,37 +1659,31 @@ async function weeklyReport({ ref, auto, manual }) {
     const D = weekData(ref || new Date()), w = D.w;
     let sums = ''; try { if (DESK && window.wv1desk.summaryRecent) sums = await window.wv1desk.summaryRecent({ dias: 8, max: 14000 }) || ''; } catch {}
     let r;
-    if (!db.settings.apiKey) r = { obras: [{ nome: 'Geral', feito: D.feitas.map(x => x.slice(2)), pendente: D.pend.map(x => x.slice(2)), esperando: D.mine.filter(x => x.includes('[sem resposta depois]')).map(x => x.slice(2).replace(' [sem resposta depois]', '')) }], proxima_semana: D.evN.map(x => x.slice(2)), atencao: [] };
+    if (!db.settings.apiKey && !oaOn()) r = { obras: [{ nome: 'Geral', feito: D.feitas.map(x => x.slice(2)), pendente: D.pend.map(x => x.slice(2)), esperando: D.mine.filter(x => x.includes('[sem resposta depois]')).map(x => x.slice(2).replace(' [sem resposta depois]', '')) }], proxima_semana: D.evN.map(x => x.slice(2)), atencao: [] };
     else {
       const sec = (t, a) => `${t}:\n${(Array.isArray(a) ? a.join('\n') : a) || '(nada)'}`;
       const dados = [sec('Atividades concluídas na semana', D.feitas), sec('Atividades pendentes (todas)', D.pend), sec('Sugestões do WhatsApp ainda sem resposta dele', D.sug), sec('Compromissos desta semana', D.evW), sec('Compromissos da próxima semana', D.evN), sec('Mensagens que o app enviou por ele (planos aprovados)', D.planos), sec('Mensagens dele no WhatsApp nesta semana ([sem resposta depois] = ninguém escreveu na conversa depois)', D.mine), sec('Resumos diários do WhatsApp (escritos por você; use só os desta semana)', sums)].join('\n\n');
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': db.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: db.settings.model || 'claude-sonnet-5-5', max_tokens: 3000,
+      r = await aiJson({ max: 10000, effort: 'medium',
           system: `Você é a secretária executiva de ${db.settings.myName || 'o usuário'}. Perfil dele: ${db.settings.profile || '(não informado)'}
 Memória (pessoas, obras, clientes):\n${db.facts.slice(-60).map(f => '- ' + f).join('\n') || '(nada ainda)'}
 Monte o resumo da semana de ${w.de} a ${w.ate} usando SÓ os dados que ele mandar. Agrupe por obra, contrato ou cliente (use os nomes da memória e das conversas, ex.: "Obra Araquari (Trojan)"); o que não for de uma obra vai em "Geral" e o que for pessoal em "Pessoal". Para cada grupo:
 - feito: o que foi concluído ou entregue na semana (atividades marcadas como feitas, entregas confirmadas nas conversas e nos resumos);
 - pendente: o que ainda depende DELE (atividades abertas, pedidos e perguntas a ele sem resposta), com prazo quando houver, e "ATRASADA" se passou;
 - esperando: o que ele pediu ou cobrou de outra pessoa e ainda não veio (mensagens dele com pedido e sem resposta depois, mensagens enviadas pelos planos), com quem e desde quando.
-Frases curtas e concretas, com número, documento e prazo quando houver. Não invente nem estime: sem dado, deixe de fora. Não repita o mesmo item em dois grupos. Em "atencao", no máximo 4 riscos reais (prazo vencendo, contrato, órgão público cobrando, dinheiro, conflito de agenda). Em "proxima_semana", os compromissos e prazos de ${D.nx.de} a ${D.nx.ate}.`,
-          tools: [{ name: 'resumo_semanal', description: 'Resumo da semana por obra', input_schema: { type: 'object', properties: {
+Frases curtas e concretas, com número, documento e prazo quando houver. Não invente nem estime: sem dado, deixe de fora. Não repita o mesmo item em dois grupos. Em "atencao", no máximo 4 riscos reais (prazo vencendo, contrato, órgão público cobrando, dinheiro, conflito de agenda). Em "proxima_semana", os compromissos e prazos de ${D.nx.de} a ${D.nx.ate}. Responda só com o JSON pedido; campo sem informação vai como texto vazio.`,
+          user: dados, schema: { type: 'object', properties: {
             obras: { type: 'array', items: { type: 'object', properties: { nome: { type: 'string' }, feito: { type: 'array', items: { type: 'string' } }, pendente: { type: 'array', items: { type: 'string' } },
-              esperando: { type: 'array', items: { type: 'object', properties: { o_que: { type: 'string' }, quem: { type: 'string' }, desde: { type: 'string', description: 'DD/MM' } }, required: ['o_que'] } } }, required: ['nome'] } },
-            proxima_semana: { type: 'array', items: { type: 'string' } }, atencao: { type: 'array', items: { type: 'string' } } }, required: ['obras'] } }],
-          tool_choice: { type: 'tool', name: 'resumo_semanal' },
-          messages: [{ role: 'user', content: dados }] })
-      });
-      const data = await res.json(); if (!res.ok) throw new Error(data?.error?.message || ('HTTP ' + res.status));
-      r = data.content.find(b => b.type === 'tool_use')?.input || { obras: [] };
+              esperando: { type: 'array', items: { type: 'object', properties: { o_que: { type: 'string' }, quem: { type: 'string' }, desde: { type: 'string', description: 'DD/MM' } } } } } } },
+            proxima_semana: { type: 'array', items: { type: 'string' } }, atencao: { type: 'array', items: { type: 'string' } } } } });
     }
     const md = weekMd(r, w);
     let file = '';
     if (DESK && window.wv1desk.docWrite) { const o = await window.wv1desk.docWrite({ dir: 'Resumos semanais', name: `Semana ${w.de} a ${w.ate}`, text: md }); if (o && o.file) file = o.file; }
     const cnt = k => (r.obras || []).reduce((n, o) => n + (o[k] || []).length, 0);
     if (typing) { const c = db.chats.find(x => x.id === 'claude'); c.messages = c.messages.filter(x => x.id !== typing.id); }
-    pushMsg('claude', { from: 'them', card: { type: 'week', id: uid(), de: w.de, ate: w.ate, file, md, obras: (r.obras || []).map(o => o.nome), atencao: (r.atencao || [])[0] || '', counts: { feito: cnt('feito'), pendente: cnt('pendente'), esperando: cnt('esperando') } } });
+    const wid = uid();
+    pushMsg('claude', { from: 'them', card: { type: 'week', id: wid, de: w.de, ate: w.ate, file, md, obras: (r.obras || []).map(o => o.nome), atencao: (r.atencao || [])[0] || '', counts: { feito: cnt('feito'), pendente: cnt('pendente'), esperando: cnt('esperando') } } });
+    brainAdd({ kind: 'week', icon: '📊', cardId: wid, text: `Resumo da semana pronto (${shortRange(w.de, w.ate)}): ${cnt('pendente')} pendente(s), ${cnt('esperando')} esperando terceiros.`, sub: (r.obras || []).map(o => o.nome).join(' · '), quiet: true });
     if (auto) notify('📊 Resumo da semana pronto', `${(r.obras || []).length} obra(s) · ${cnt('pendente')} pendente(s) · ${cnt('esperando')} esperando terceiros`);
     return { ok: true, file, obras: (r.obras || []).map(o => o.nome) };
   } catch (e) {
@@ -1586,6 +1691,195 @@ Frases curtas e concretas, com número, documento e prazo quando houver. Não in
     pushMsg('claude', { from: 'them', text: '⚠️ Não consegui montar o resumo da semana: ' + e.message + '. Peça de novo com "📊 Resumo da semana".' });
     return { error: e.message };
   } finally { weekBusy = false; save(); renderSide(); }
+}
+
+// ---------- 🧠 Cérebro: lê tudo o que chega, vai narrando no meio do painel e diz o que importa agora ----------
+// feed = o que ele foi contando (o mais novo em cima); pulse = "Agora": prioridades cruzando conversas, agenda e atividades
+var brainBusy = false, brainTimer = null, brainErr = ''; // var: o painel lê antes desta linha rodar
+var URG = { alta: '🔴', media: '🟠', baixa: '⚪' };
+function sideView() { return db.meta.sideView === 'chat' ? 'chat' : 'brain'; }
+function setSideView(v) {
+  db.meta.sideView = v === 'chat' ? 'chat' : 'brain'; save();
+  if (v === 'chat') { const c = db.chats.find(x => x.id === 'claude'); if (c.unread) { c.unread = 0; save(); } }
+  renderSide();
+  if (v === 'chat') { const b = $('#sideMsgs'); if (b) b.scrollTop = b.scrollHeight; }
+}
+function renderSideTabs() {
+  const t = $('#sideTabs'); if (!t) return;
+  const v = sideView(), n = db.chats.find(x => x.id === 'claude').unread || 0;
+  $('#cal').classList.toggle('vchat', v === 'chat');
+  t.innerHTML = `<button data-act="side-view" data-id="brain" class="${v === 'brain' ? 'on' : ''}">🧠 Cérebro${brainBusy ? ' <span class="think">pensando…</span>' : ''}</button>`
+    + `<button data-act="side-view" data-id="chat" class="${v === 'chat' ? 'on' : ''}">💬 Conversa${n && v !== 'chat' ? ` <i>${n}</i>` : ''}</button>`
+    + `<button class="vt" data-act="brain-voice" title="${db.brain.voice ? 'Falando sozinho quando chega coisa importante (clique para calar)' : 'Clique para eu falar em voz alta quando chegar coisa importante'}">${db.brain.voice ? '🔊' : '🔇'}</button>`;
+}
+function brainAdd(e) {
+  const B = db.brain, x = { id: uid(), ts: new Date().toISOString(), prio: 'media', ...e };
+  if (x.key) B.feed = B.feed.filter(f => f.key !== x.key); // um por assunto: o aviso novo da mesma atividade substitui o anterior
+  B.feed.unshift(x); if (B.feed.length > 150) B.feed.length = 150;
+  save(); renderBrain();
+  if (B.voice && x.prio === 'alta' && !x.quiet) speak(x.say || x.text);
+  return x;
+}
+function brainFind(pred) { return db.brain.feed.find(pred); }
+function brainResolve(sugId, st, ref) { const f = brainFind(x => x.sugId === sugId); if (!f) return false; f.st = st; if (ref) Object.assign(f, ref); save(); renderBrain(); return true; }
+function feedTime(iso) { const d = new Date(iso); return ymd(d) === ymd(new Date()) ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`; }
+function sugFala(it) { // frase de narrador quando a leitura não mandou uma
+  const fim = { compromisso: 'tem isso para agendar', lembrete: 'vale um lembrete', responder: 'está esperando sua resposta' }[it.tipo] || 'fica com você';
+  return `${it.pessoa || it.conversa || 'Alguém'}: ${it.titulo.replace(/^Responder [^:]*:\s*/i, '')} — ${fim}.`;
+}
+function feedLive(f) { // ainda pede algo dele?
+  if (f.kind === 'sug') return db.inbox.some(x => x.id === f.sugId);
+  if (f.kind === 'done?') { const t = db.tasks.find(x => x.id === f.taskId); return !!(t && !t.done && t.askDone); }
+  if (f.kind === 'rem') { if (f.eventId) return db.events.some(e => e.id === f.eventId); const t = db.tasks.find(x => x.id === f.taskId); return !!(t && !t.done); }
+  if (f.kind === 'plan') { const p = db.plans.find(x => x.id === f.planId); return !!(p && p.status === 'aguardando_ok'); }
+  return f.st !== 'off';
+}
+function feedSub(f) {
+  if (f.kind === 'sug' && !feedLive(f)) return f.st === 'ok' ? (f.eventId ? '✓ virou compromisso' : f.taskId ? '✓ virou atividade' : '✓ resposta preparada na Conversa') : 'dispensado';
+  if (f.kind === 'done?' && !feedLive(f)) { const t = db.tasks.find(x => x.id === f.taskId); return t && t.done ? '✓ feito, saiu da lista' : 'ficou na lista'; }
+  if (f.kind === 'rem' && f.taskId && !feedLive(f)) return '✓ feito';
+  if (f.kind === 'plan') { const p = db.plans.find(x => x.id === f.planId); if (!p) return ''; return p.status === 'aguardando_ok' ? p.passos.map(st => (STEP_ICON[st.tipo] || '•') + ' ' + stepText(st)).join('\n') : '✓ ' + (PLAN_STATUS[p.status] || p.status); }
+  return f.sub || '';
+}
+function feedActs(f) {
+  const b = (act, label, cls) => `<button ${cls ? `class="${cls}"` : ''} data-act="${act}" data-id="${f.id}">${label}</button>`;
+  const open = f.chat && DESK ? b('brain-open', '💬 Abrir') : '';
+  if (!feedLive(f)) return f.kind === 'sug' ? (f.eventId ? `<button data-event="${f.eventId}">📅 Ver</button>` : f.taskId ? `<button data-task="${f.taskId}">✅ Ver</button>` : '') : f.kind === 'info' || f.kind === 'pulse' ? open : '';
+  if (f.kind === 'sug') {
+    const it = db.inbox.find(x => x.id === f.sugId), agendar = it.tipo === 'compromisso' && it.quando.length > 10;
+    const main = it.tipo === 'responder' ? b('brain-reply', '✍️ Responder', 'ok') + b('brain-acc', '✅ Virar tarefa') : b('brain-acc', agendar ? '📅 Agendar' : it.tipo === 'lembrete' ? '🔔 Lembrar' : '✅ Virar tarefa', 'ok') + (it.pessoa && db.settings.apiKey ? b('brain-reply', '✍️ Responder') : '');
+    return main + open + b('brain-no', '✕', 'x');
+  }
+  if (f.kind === 'done?') return `<button class="ok" data-act="done-yes" data-id="${f.taskId}">✅ Sim, foi feito</button><button data-act="done-no" data-id="${f.taskId}">Ainda não</button>`;
+  if (f.kind === 'rem') return f.eventId ? `<button data-event="${f.eventId}">📅 Abrir</button>` : `<button class="ok" data-toggle="${f.taskId}">✅ Feito</button>` + b('brain-snooze', '⏰ +1 h') + `<button data-act="task-plan" data-id="${f.taskId}">⚡ Resolver</button>`;
+  if (f.kind === 'plan') return `<button class="ok" data-act="plan-ok" data-id="${f.planId}">✅ Ok, pode fazer</button><button data-act="plan-cancel" data-id="${f.planId}">Cancelar</button>`;
+  if (f.kind === 'week') return f.cardId ? `<button data-act="week-view" data-id="${f.cardId}">Ver resumo</button>` : '';
+  return open;
+}
+function feedHtml(f) {
+  const live = feedLive(f), sub = feedSub(f), acts = feedActs(f), lines = String(f.text || '').split('\n'), long = f.kind === 'brief' && lines.length > 7;
+  const txt = long && !f.open ? lines.slice(0, 6).join('\n') + '\n…' : f.text;
+  const dim = !live && ['sug', 'done?', 'rem', 'plan'].includes(f.kind);
+  return `<div class="fe k-${f.kind}${f.prio === 'alta' && !dim ? ' alta' : ''}${dim ? ' off' : ''}${Date.now() - new Date(f.ts) < 8000 ? ' fresh' : ''}"><div class="tm">${feedTime(f.ts)}</div><div class="fb">`
+    + (f.head ? `<div class="fh">${esc(f.head)}</div>` : '')
+    + `<div class="tx">${f.icon ? f.icon + ' ' : ''}${esc(txt)}</div>` + (long ? `<button class="more2" data-act="brain-more" data-id="${f.id}">${f.open ? 'mostrar menos' : 'ver tudo'}</button>` : '')
+    + (sub ? `<div class="sb">${esc(sub)}</div>` : '') + (acts ? `<div class="fa">${acts}</div>` : '') + '</div></div>';
+}
+function prActs(x) {
+  const b = (act, label, cls) => `<button ${cls ? `class="${cls}"` : ''} data-act="${act}" data-id="${esc(x.chave)}">${label}</button>`;
+  const main = { responder: b('pr-plan', '✍️ Preparar resposta', 'ok'), cobrar: b('pr-plan', '✍️ Preparar cobrança', 'ok'), agendar: b('pr-plan', '📅 Agendar', 'ok'), tarefa: b('pr-task', '✅ Virar tarefa', 'ok'),
+    concluir: x.atividade_id && db.tasks.some(t => t.id === x.atividade_id) ? `<button class="ok" data-toggle="${esc(x.atividade_id)}">✅ Foi feito?</button>` : '' }[x.acao] || '';
+  return main + (x.conversa && DESK ? b('pr-open', '💬 Abrir') : '') + b('pr-off', '✕', 'x');
+}
+function brainPrios() {
+  const p = db.brain.pulse, off = db.brain.off, now = Date.now();
+  return ((p && p.prioridades) || []).filter(x => !(off[x.chave] > now - 864e5) && !(x.atividade_id && (db.tasks.find(t => t.id === x.atividade_id) || {}).done));
+}
+function pulseHtml() {
+  const p = db.brain.pulse, keyless = !db.settings.apiKey && !oaOn();
+  const st = brainBusy ? '<span class="think">pensando…</span>' : brainErr ? '⚠️ ' + esc(brainErr) : p && p.ts ? 'atualizado ' + feedTime(p.ts) + (p.via === 'openai' ? ' · pela OpenAI (reserva)' : p.via === 'basico' ? ' · modo básico' : '') : '';
+  const head = `<div class="bh"><b>Agora</b><span class="bs">${st}</span><span class="bb"><button data-act="brain-say" title="Ouvir em voz alta">🗣️</button><button data-act="brain-think" title="Pensar de novo agora">↻</button></span></div>`;
+  if (!p) return `<div class="bnow">${head}<div class="man mu">${keyless ? 'Sem a chave do Claude eu só organizo o básico (Configurações).' : 'Estou juntando o que chegou; já te conto o que importa.'}</div></div>`;
+  const pr = brainPrios();
+  return `<div class="bnow">${head}<div class="man">${esc(p.manchete || '')}</div>`
+    + pr.map(x => `<div class="pr"><span class="n">${URG[x.urgencia] || '•'}</span><div class="pb"><div class="pt2">${esc(x.titulo)}</div>${x.porque ? `<div class="why">${esc(x.porque)}</div>` : ''}<div class="fa">${prActs(x)}</div></div></div>`).join('')
+    + ((p.conexoes || []).length ? `<div class="bcx">${p.conexoes.slice(0, 3).map(c => '🔗 ' + esc(c)).join('<br>')}</div>` : '') + '</div>';
+}
+function renderBrain() {
+  renderSideTabs();
+  const box = $('#brain'); if (!box || sideView() !== 'brain') return;
+  const feed = db.brain.feed.slice(0, 80);
+  box.innerHTML = pulseHtml() + (feed.length ? `<div class="bfeed">${feed.map(feedHtml).join('')}</div>`
+    : `<div class="bempty">Assim que chegar coisa nova no WhatsApp eu conto aqui, com o mais novo em cima.</div>`);
+}
+// o que mudou desde a última vez que pensei (só repenso sozinho quando muda)
+function brainSig() { return [db.waLog.length, db.inbox.length, db.tasks.filter(t => !t.done).length, db.events.length, db.plans.filter(p => p.status === 'aguardando_ok').length].join('|'); }
+function brainSec(t, a) { return `## ${t}\n${(Array.isArray(a) ? a.join('\n') : a) || '(nada)'}`; }
+function brainInput() {
+  const now = new Date(), nowIso = localISO(now), today = ymd(now), lim = localISO(new Date(Date.now() + 36 * 3600e3));
+  const evs = sortedEvents().filter(e => (e.allDay ? e.start.slice(0, 10) >= today : (e.end || e.start) >= nowIso) && e.start <= lim).slice(0, 12)
+    .map(e => `- [${e.id}] ${e.allDay ? e.start.slice(0, 10) + ' (dia todo)' : e.start} ${e.title}${e.location ? ' @ ' + e.location : ''}`);
+  const late = t => (t.remindAt && t.remindAt < nowIso) || (!t.remindAt && t.due && t.due < today);
+  const tasks = db.tasks.filter(t => !t.done).sort((a, b) => (a.remindAt || a.due || '9').localeCompare(b.remindAt || b.due || '9')).slice(0, 30).map(t => {
+    const src = t.chatId && t.chatId !== 'claude' && db.chats.find(c => c.id === t.chatId);
+    return `- [${t.id}] ${t.title}${t.remindAt ? ' · lembrete ' + t.remindAt : t.due ? ' · prazo ' + t.due : ''}${late(t) ? ' · ATRASADA' : ''}${src ? ' · ' + src.name : ''}`;
+  });
+  const sug = db.inbox.slice(0, 15).map(x => `- ${x.titulo}${x.quando ? ' (' + x.quando + ')' : ''} · ${[x.pessoa, x.conversa].filter(Boolean).join(' · ')} · prioridade ${x.prioridade}${x.trecho ? ' · “' + x.trecho.slice(0, 140) + '”' : ''}`);
+  const since = localISO(new Date(Date.now() - 12 * 3600e3)), wk = localISO(new Date(Date.now() - 7 * 864e5)), byChat = {}, week = {};
+  for (const m of db.waLog) { if (m.prev) continue; if (m.when >= since) (byChat[m.chat] = byChat[m.chat] || []).push(m); if (m.when >= wk) (week[m.chat] = week[m.chat] || []).push(m); }
+  const wa = Object.entries(byChat).sort((a, b) => b[1][b[1].length - 1].when.localeCompare(a[1][a[1].length - 1].when)).slice(0, 18).map(([chat, ms]) => {
+    const k = ms.map(m => m.who !== 'Eu').lastIndexOf(true), answered = k >= 0 && ms.slice(k + 1).some(m => m.who === 'Eu');
+    return `### ${chat}\n` + ms.slice(-10).map(m => `- ${m.when.slice(11, 16)} ${m.who}: ${m.text.slice(0, 260)}${m === ms[k] && !answered ? ' [sem resposta sua]' : ''}`).join('\n');
+  }).join('\n');
+  const waiting = Object.entries(week).map(([chat, ms]) => ms[ms.length - 1]).filter(m => m.who === 'Eu' && /\?|manda|envia|aguardo|confirma|preciso|pode|consegue/i.test(m.text))
+    .slice(0, 10).map(m => `- ${m.when.slice(8, 10)}/${m.when.slice(5, 7)} ${m.when.slice(11, 16)} ${m.chat}: ${m.text.slice(0, 160)}`);
+  const P = db.brain.pulse, prev = P ? `manchete: ${P.manchete}\n` + (P.prioridades || []).map(x => `- ${x.chave}: ${x.titulo}`).join('\n') : '(primeira vez)';
+  const off = Object.entries(db.brain.off).filter(([, t]) => t > Date.now() - 864e5).map(([k]) => k);
+  return [`Agora: ${nowIso} (${now.toLocaleDateString('pt-BR', { weekday: 'long' })}).`, brainSec('Agenda (próximas 36 h)', evs), brainSec('Atividades pendentes', tasks),
+    brainSec('Coisas novas do WhatsApp esperando o Sim dele', sug), brainSec('WhatsApp nas últimas 12 h, por conversa ("Eu" = ele)', wa), brainSec('Ele pediu algo e ninguém respondeu ainda (7 dias)', waiting),
+    brainSec('Memória (pessoas, obras, clientes)', db.facts.slice(-40).map(f => '- ' + f)), brainSec('Resumos recentes do WhatsApp (escritos por você)', (recentSums || '').slice(-2500)),
+    brainSec('O que você disse da última vez', prev), brainSec('Dispensados por ele (não traga de volta hoje)', off)].join('\n\n');
+}
+function brainSystem() {
+  return `Você é o cérebro da assistente pessoal de ${db.settings.myName || 'o usuário'}, dentro do app de WhatsApp dele. Perfil dele: ${db.settings.profile || '(não informado)'}
+Você recebe o que chegou no WhatsApp dele nas últimas horas, a agenda, as atividades e o que você disse da última vez. Diga, como uma secretária executiva muito boa que conhece as obras, os contratos e as pessoas, o que importa AGORA.
+- manchete: 1 ou 2 frases para ele ouvir, começando pelo mais importante, com nome, hora e assunto (ex.: "Tiago, o Alex espera sua resposta sobre o financeiro desde 14:53; às 17:30 tem a reunião com o Tiago."). Sem cumprimento e sem emoji. Se não há nada importante, diga isso em uma frase.
+- prioridades: no máximo 5, em ordem de importância. Entram: pergunta ou pedido a ele sem resposta (cliente, órgão público e prazo primeiro; quanto mais antigo, mais alto), atividade atrasada ou vencendo, compromisso nas próximas horas e o que ele precisa levar ou preparar, conflito de horário, dinheiro, e o que outra pessoa ficou de mandar e não mandou. "porque" é UMA frase que liga os fatos: quem, desde quando, de qual conversa veio e o que depende disso. "acao": responder (ele precisa responder alguém), cobrar (cobrar alguém), agendar (marcar algo com data), tarefa (vira atividade), concluir (parece feita; atividade_id obrigatório), ver (só olhar). "conversa": o nome exatamente como nos títulos "###" (ou vazio). "atividade_id": o id exatamente como na lista (ou vazio). "chave": identificador curto e estável do assunto (ex.: "alex-financeiro"); repita a chave da última vez quando for o mesmo assunto.
+- conexoes: até 3 cruzamentos que ele não veria sozinho: mesmo assunto em conversas diferentes, conflito de agenda, alguém esperando outra pessoa, documento pedido num lugar e recebido em outro, prazo de uma obra afetando outra. Só com dado real; sem isso, lista vazia.
+Use só os dados enviados: não invente nome, valor, data ou documento. O que ele dispensou não volta hoje. Nunca diga que mandou ou fez algo: as ações só preparam, e ele aprova.`;
+}
+var BRAIN_SCHEMA = { type: 'object', properties: {
+  manchete: { type: 'string', description: '1 ou 2 frases faladas, começando pelo mais importante' },
+  prioridades: { type: 'array', description: 'no máximo 5, em ordem', items: { type: 'object', properties: {
+    chave: { type: 'string' }, titulo: { type: 'string', description: 'ação curta' }, porque: { type: 'string', description: 'uma frase que liga os fatos' },
+    conversa: { type: 'string' }, atividade_id: { type: 'string' },
+    acao: { type: 'string', enum: ['responder', 'cobrar', 'agendar', 'tarefa', 'concluir', 'ver'] }, urgencia: { type: 'string', enum: ['alta', 'media', 'baixa'] } } } },
+  conexoes: { type: 'array', items: { type: 'string' } } } };
+function brainBasic() { // sem chave da IA: o básico, contado pelo próprio app
+  const nowIso = localISO(new Date()), today = ymd(new Date()), soon = localISO(new Date(Date.now() + 3 * 3600e3));
+  const late = db.tasks.filter(t => !t.done && ((t.remindAt && t.remindAt < nowIso) || (!t.remindAt && t.due && t.due < today)));
+  const evs = sortedEvents().filter(e => !e.allDay && e.start >= nowIso && e.start <= soon);
+  const pr = [...db.inbox.filter(x => x.prioridade === 'alta').slice(0, 2).map(x => ({ chave: 's-' + x.id, titulo: x.titulo, porque: [x.pessoa, x.conversa].filter(Boolean).join(' · '), conversa: x.conversa, atividade_id: '', acao: 'ver', urgencia: 'alta' })),
+    ...evs.slice(0, 2).map(e => ({ chave: 'e-' + e.id, titulo: e.title, porque: 'Às ' + fmtHour(e.start) + (e.location ? ' · ' + e.location : ''), conversa: '', atividade_id: '', acao: 'ver', urgencia: 'alta' })),
+    ...late.slice(0, 3).map(t => ({ chave: 't-' + t.id, titulo: t.title, porque: 'Atrasada', conversa: '', atividade_id: t.id, acao: 'concluir', urgencia: 'media' }))];
+  const parts = [late.length ? `${late.length} atividade(s) atrasada(s)` : '', evs.length ? `compromisso às ${fmtHour(evs[0].start)}` : '', db.inbox.length ? `${db.inbox.length} coisa(s) nova(s) do WhatsApp esperando seu Sim` : ''].filter(Boolean);
+  return { manchete: parts.length ? 'Agora: ' + parts.join('; ') + '.' : 'Nada urgente agora.', prioridades: pr.slice(0, 5), conexoes: [], ts: new Date().toISOString(), via: 'basico' };
+}
+function brainSoon(ms) { clearTimeout(brainTimer); brainTimer = setTimeout(() => brainThink(), ms == null ? 20000 : ms); }
+async function brainThink(force) {
+  if (brainBusy) return;
+  const B = db.brain, since = Date.now() - (B.at || 0);
+  if (!force && since < 4 * 60e3) { brainSoon(4 * 60e3 - since + 500); return; }
+  clearTimeout(brainTimer);
+  if (!db.settings.apiKey && !oaOn()) { B.pulse = brainBasic(); B.at = Date.now(); B.sig = brainSig(); save(); renderBrain(); return; }
+  brainBusy = true; brainErr = ''; renderBrain(); renderSide();
+  try {
+    const out = await aiJson({ system: brainSystem(), user: brainInput(), schema: BRAIN_SCHEMA, max: 8000, effort: 'medium' });
+    const old = new Set(((B.pulse || {}).prioridades || []).map(p => p.chave)), first = !B.pulse;
+    out.prioridades = (out.prioridades || []).filter(p => p && p.titulo && !(B.off[p.chave] > Date.now() - 864e5)).slice(0, 5);
+    out.conexoes = (out.conexoes || []).filter(Boolean).slice(0, 3);
+    B.pulse = { ...out, ts: new Date().toISOString(), via: aiJson.last };
+    const novas = out.prioridades.filter(p => p.urgencia === 'alta' && !old.has(p.chave));
+    if (novas.length && !first) { // mudou algo importante: fala sozinho
+      brainAdd({ kind: 'pulse', icon: '🧠', text: out.manchete, chat: novas[0].conversa || '', prio: 'alta', quiet: true });
+      notify('🧠 ' + novas[0].titulo, novas[0].porque || out.manchete);
+      if (B.voice) speak(out.manchete);
+    }
+  } catch (e) { brainErr = String(e.message || e).slice(0, 90); console.warn('cérebro:', brainErr); }
+  finally { B.at = Date.now(); B.sig = brainSig(); brainBusy = false; save(); renderBrain(); renderSide(); }
+}
+async function brainPlan(x) { // ✍️: a assistente lê a conversa e monta o plano; nada sai sem o ok dele
+  if (!db.settings.apiKey) { toast('Para eu preparar a mensagem, configure a chave do Claude em Configurações'); return; }
+  const verbo = { cobrar: 'Prepare a cobrança', agendar: 'Agende', responder: 'Prepare a resposta' }[x.acao] || 'Resolva';
+  if (x.chave) { db.brain.off[x.chave] = Date.now(); save(); }
+  setSideView('chat');
+  pushMsg('claude', { from: 'me', text: `✍️ ${verbo}: ${x.titulo}.${x.porque ? ' ' + x.porque : ''}${x.conversa ? ` (conversa "${x.conversa}")` : ''}${x.atividade_id ? ` [atividade ${x.atividade_id}]` : ''} Leia a conversa antes e monte para eu aprovar.` });
+  await askClaude('');
+}
+function waOpen(chat) { // abre a conversa no WhatsApp ao lado
+  if (!DESK || !waWv || !chat) return;
+  tab = 'wa'; db.meta.view = 'wa'; save(); render();
+  try { waWv.send('wa-open', { chat }); } catch {}
 }
 
 // ---------- computador: WhatsApp Web dentro do app ----------
@@ -1621,6 +1915,7 @@ if (DESK) {
     if (e.channel === 'wa-msgs') ingestWa(e.args[0]);
     if (e.channel === 'wa-audio-seen') audioSeen(e.args[0]);
     if (e.channel === 'wa-audio') onWaAudio(e.args[0]);
+    if (e.channel === 'wa-opened') { const r = e.args[0] || {}; if (!r.ok) toast('Não achei a conversa "' + (r.chat || '') + '" na lista do WhatsApp'); }
     if (e.channel === 'wa-audio-bind') { const b = e.args[0] || {}; if (b.id && b.text) { audKeep([b.id], b.text); audMark(b.id); if (b.key) audBound.add(b.key); save(); } }
     if (e.channel === 'wa-audio-done') { const r = e.args[0] || {}; const w = audWaiters[r.reqId]; if (w) { delete audWaiters[r.reqId]; w(r); } }
     if (e.channel === 'wa-sent') { const r = e.args[0] || {}; const w = waSendWaiters[r.id]; if (w) { delete waSendWaiters[r.id]; w(r); } }
@@ -1665,7 +1960,8 @@ function tick() {
   for (const t of db.tasks) {
     if (t.remindAt && !t.done && !t.notified && t.remindAt <= now) {
       t.notified = true; changed = true;
-      pushMsg('claude', { from: 'them', card: { type: 'task', id: t.id, remind: true, alarm: true } });
+      const src = t.chatId && t.chatId !== 'claude' && db.chats.find(c => c.id === t.chatId);
+      brainAdd({ kind: 'rem', key: 't:' + t.id, taskId: t.id, head: '⏰ Hora do lembrete · ' + fmtHour(t.remindAt), text: t.title, sub: src ? '💬 ' + src.name : '', prio: 'alta', say: 'Lembrete: ' + t.title });
       notify('⏰ ' + t.title, 'Lembrete do WhatsApp v1');
     }
   }
@@ -1674,14 +1970,14 @@ function tick() {
     if (t.done) continue;
     for (const w of dueWarnings(t, t.remindAt || t.due, false)) {
       changed = true; const head = warnHead(w, t.remindAt || t.due, 'task');
-      pushMsg('claude', { from: 'them', card: { type: 'task', id: t.id, remind: !!t.remindAt, soon: head } });
+      brainAdd({ kind: 'rem', key: 't:' + t.id, taskId: t.id, head, text: t.title, prio: w === 'h1' ? 'alta' : 'media', say: head.replace(/^\W+/, '') + ': ' + t.title });
       notify('⏳ ' + t.title, head);
     }
   }
   for (const ev of db.events) {
     for (const w of dueWarnings(ev, ev.start, ev.allDay)) {
       changed = true; const head = warnHead(w, ev.start, 'event', ev.allDay);
-      pushMsg('claude', { from: 'them', card: { type: 'event', id: ev.id, soon: head } });
+      brainAdd({ kind: 'rem', key: 'e:' + ev.id, eventId: ev.id, head, text: ev.title, sub: ev.location ? '📍 ' + ev.location : '', prio: w === 'h1' ? 'alta' : 'media', say: head.replace(/^\W+/, '') + ': ' + ev.title });
       notify('📅 ' + ev.title, head + (ev.location ? ' · ' + ev.location : ''));
     }
   }
@@ -1695,6 +1991,11 @@ function tick() {
   if (db.settings.weekly !== false && Date.now() >= fri.getTime() && Date.now() - fri.getTime() < 3 * 864e5 && db.meta.weekly !== ymd(fri)) { db.meta.weekly = ymd(fri); changed = true; weeklyReport({ ref: fri, auto: true }); }
   if (changed) { save(); render(); }
   scheduleSweeps();
+  if (db.settings.brain !== false && !brainBusy) {
+    const age = Date.now() - (db.brain.at || 0), h = new Date().getHours();
+    if (!db.settings.apiKey && !oaOn()) { if (!db.brain.pulse || age > 10 * 60e3) brainThink(); }
+    else if ((db.brain.sig !== brainSig() && age > 15 * 60e3) || (age > 90 * 60e3 && h >= 7 && h < 22)) brainThink();
+  }
 }
 
 function warnPoints(when, allDay) {
@@ -1737,12 +2038,12 @@ function briefData(kind) {
   return lines.join('\n\n');
 }
 async function briefing(kind) {
-  const text = briefData(kind);
-  if (!db.settings.apiKey) { pushMsg('claude', { from: 'them', text }); return; }
+  const text = briefData(kind), post = t => brainAdd({ kind: 'brief', head: kind === 'manha' ? '☀️ Briefing da manhã' : '🌙 Fechando o dia', text: t, quiet: true });
+  if (!db.settings.apiKey) { post(text); return; }
   try {
-    await callClaude({ system: systemPrompt() + `\nVocê está escrevendo, por iniciativa própria, o briefing ${kind === 'manha' ? 'da manhã' : 'do fim do dia'}.`, tools: TOOLS, postTo: 'claude',
+    await callClaude({ system: systemPrompt() + `\nVocê está escrevendo, por iniciativa própria, o briefing ${kind === 'manha' ? 'da manhã' : 'do fim do dia'}.`, tools: TOOLS, postTo: 'claude', onText: post,
       messages: [{ role: 'user', content: `[briefing automático, não é mensagem do usuário] Dados:\n${text}\n\nEscreva o briefing ${kind === 'manha' ? 'da manhã' : 'do fim do dia: o que ficou pendente e o que vem amanhã'} como secretária: curto, em tópicos com emojis, e no máximo 2 sugestões práticas (cobrar alguém, remarcar, mandar um documento). Se algo atrasado merecer lembrete, crie com criar_lembrete. Sem cumprimento longo.` }] });
-  } catch { pushMsg('claude', { from: 'them', text }); }
+  } catch { post(text); }
 }
 setInterval(tick, 30e3);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); if (db.settings.apiKey) readAll(false); } else if (db.settings.waSweep !== false) setTimeout(() => { if (document.hidden) requestSweep({ full: false, force: true }); }, 20000); });
@@ -1753,7 +2054,8 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferr
 $('#btnInstall').addEventListener('click', async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; $('#btnInstall').style.display = 'none'; });
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
-db.inbox.slice().reverse().forEach(askInbox); // sugestões que estavam no antigo "A fazer" viram cartões Sim/Não
+db.inbox.slice().reverse().forEach(it => askInbox(it, true)); // o que estava esperando o Sim dele entra no Cérebro
 render();
 tick();
 if (db.settings.apiKey) setTimeout(() => readAll(false), 1500);
+setTimeout(() => { if (db.settings.brain !== false && Date.now() - (db.brain.at || 0) > 20 * 60e3) brainThink(); }, 8000);

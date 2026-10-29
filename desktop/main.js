@@ -144,6 +144,17 @@ function multipart(fields, file) {
   parts.push(Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: ${file.type}\r\n\r\n`), file.data, Buffer.from(`\r\n--${b}--\r\n`));
   return { body: Buffer.concat(parts), type: 'multipart/form-data; boundary=' + b };
 }
+// OpenAI (opcional, chave dele): voz do Cérebro e reserva quando o Claude falha; passa por aqui para não depender de CORS
+ipcMain.handle('wv1:openai', async (_, { key, path: p, body }) => {
+  if (!['chat/completions', 'audio/speech'].includes(p)) return { error: 'caminho não permitido' };
+  if (!key) return { error: 'sem chave da OpenAI' };
+  try {
+    const r = await net.fetch('https://api.openai.com/v1/' + p, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify(body) });
+    if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); m = (j.error && j.error.message) || m; } catch {} return { error: m }; }
+    if (p === 'audio/speech') return { audio: 'data:audio/mpeg;base64,' + Buffer.from(await r.arrayBuffer()).toString('base64') };
+    return { json: await r.json() };
+  } catch (e) { return { error: e.message }; }
+});
 ipcMain.handle('wv1:stt', async (_, { provider, key, buf, file, type, chat, when, prompt, save }) => {
   try {
     const p = STT[provider] || STT.groq;

@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('wv1desk', {
   docWrite: d => ipcRenderer.invoke('wv1:doc-write', d),
   openPath: f => ipcRenderer.invoke('wv1:open-path', f),
   stt: d => ipcRenderer.invoke('wv1:stt', d),
+  openai: d => ipcRenderer.invoke('wv1:openai', d),
   updateDownload: () => ipcRenderer.invoke('wv1:update-download'),
   updateInstall: () => ipcRenderer.invoke('wv1:update-install'),
   onUpdateProgress: cb => ipcRenderer.on('wv1:update-progress', (_, d) => cb(d))

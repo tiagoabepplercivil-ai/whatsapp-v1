@@ -30,6 +30,22 @@ A partir da 1.8.0 o app verifica sozinho ao abrir e a cada 4 h. Melhoria só na 
 ## Planos de execução ("ok" e ela faz)
 Em cada atividade pendente do painel há "⚡ preparar execução": a assistente monta um plano (mensagem pronta para a pessoa certa no WhatsApp, compromisso, lembrete, nota, baixa na atividade) e mostra o cartão. Você responde **ok** (ou clica em "Ok, pode fazer") e o app executa: digita e envia a mensagem na conversa pelo WhatsApp que está dentro do app, cria o compromisso (vai para a Google Agenda se conectada), anota e dá baixa. Nada é enviado sem o seu ok. Quando você diz "Sim" num cartão "fulano te perguntou", a resposta já vem pronta para o ok. O manual (pendentes com seus planos, planos executados, concluídas) fica em `WhatsApp v1/Atividades.md` no Drive.
 
+## 🧠 Cérebro (painel da assistente, computador)
+O painel tem três partes: **Agenda e atividades** em cima, o **🧠 Cérebro** no meio e a caixa para escrever embaixo. A conversa com a assistente fica na aba **💬 Conversa**; quando você escreve, ela abre sozinha.
+- **Narração:** o Cérebro lê o que chega no WhatsApp e vai contando, com o mais novo em cima. Exemplo: "Kaleu mandou o cronograma da sondagem; tem a visita de sexta às 9h para agendar". Cada linha traz os botões que servem: **📅 Agendar**, **✅ Virar tarefa**, **✍️ Responder** (prepara a mensagem e espera o seu ok), **💬 Abrir** (abre a conversa no WhatsApp) e **✕** (dispensa).
+- **"Agora"** (no topo): cruza as conversas, a agenda e as atividades. Diz em uma ou duas frases o que importa, lista até 5 prioridades com o porquê e mostra 🔗 conexões entre conversas (por exemplo, conflito de data ou documento pedido num lugar e recebido em outro). Ele repensa sozinho quando chega coisa nova (no máximo a cada 15 min). **↻** faz pensar na hora e **🗣️** lê em voz alta.
+- **Lembretes e avisos** (véspera, 1 h antes, na hora) viram uma linha por atividade, com ✅ Feito, ⏰ +1 h e ⚡ Resolver. O aviso novo substitui o anterior, então não há mais pilha de cartões repetidos.
+- **🔇/🔊** (ao lado das abas) liga a voz. Com a voz ligada, ele fala sozinho quando chega coisa importante.
+- **Largura:** arraste a borda esquerda do painel; o app guarda a largura. Duplo clique volta ao padrão.
+- **Nada é enviado sem o seu ok** e nada sai da lista de atividades sem o seu Sim.
+- **Custo:** cada vez que o Cérebro pensa é uma chamada à IA com o que chegou nas últimas 12 h. Para desligar o pensamento automático: ⚙️ Configurações → 🧠 Cérebro.
+
+## 🤖 OpenAI (opcional)
+O Claude continua sendo o cérebro principal. A chave da OpenAI (platform.openai.com → API keys → ⚙️ Configurações → 🤖 OpenAI) acrescenta três coisas:
+1. **Voz natural** quando o Cérebro fala (modelo gpt-4o-mini-tts, voz gerada por IA). Sem a chave, ele usa a voz do Windows.
+2. **Reserva:** se o Claude falhar ou ficar sem crédito, a leitura do WhatsApp, o Cérebro e o resumo da semana passam a usar a OpenAI (modelo padrão gpt-5.4-mini, editável).
+3. **Transcrição de áudio:** em 🎤 Áudios, escolha OpenAI; se a chave de lá estiver vazia, ele usa esta.
+
 ## 🎤 Áudios do WhatsApp viram texto (computador)
 O Claude não recebe áudio, então a transcrição usa outro serviço, com a sua chave. Recomendado: **Groq** (modelo Whisper large v3 turbo). Cadastro único:
 1. Abra https://console.groq.com e entre (Google serve).
