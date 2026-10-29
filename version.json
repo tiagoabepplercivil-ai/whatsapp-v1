@@ -1,7 +1,7 @@
 {
-  "ui": "1.8.4",
+  "ui": "1.8.5",
   "desktop": "1.8.4",
-  "notes": "Áudios do WhatsApp viram texto e passam pela triagem (chave da Groq em Configurações). Resumo da semana por obra toda sexta às 17 h, salvo no Drive.",
+  "notes": "O texto do áudio aparece dentro da conversa, embaixo do balão: botão 🎤 Transcrever em cada áudio (também ao tocar ou usar Baixar). Precisa da chave da Groq em Configurações.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",

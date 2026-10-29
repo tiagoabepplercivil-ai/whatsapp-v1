@@ -37,8 +37,11 @@ O Claude não recebe áudio, então a transcrição usa outro serviço, com a su
 3. No app: ⚙️ Configurações → **🎤 Áudios do WhatsApp viram texto** → deixe "Groq (recomendado)", cole a chave → Salvar.
 
 Como funciona:
-- **Áudio que você toca** no WhatsApp vira texto sozinho e passa pela triagem como qualquer mensagem (pedido, pergunta, promessa, compromisso).
-- **Áudio novo que você ainda não ouviu** (até 36 h, de outra pessoa) aparece no chat da assistente com **🎤 Transcrever** / **Sempre, sozinha** / **Agora não**. Para transcrever, o app abre a conversa, toca o áudio **sem som** e pausa; por isso quem mandou vê o áudio como ouvido. "Sempre, sozinha" liga o modo automático (também em Configurações), que só roda quando você não está mexendo no WhatsApp.
+- **Dentro da conversa:** embaixo de cada áudio aparece o botão **🎤 Transcrever**. Clicou, o app toca o áudio **sem som**, pausa, e o texto aparece logo abaixo do balão, com a etiqueta "🎤 Transcrição". Quem mandou vê o áudio como ouvido. O texto continua lá quando você rola, troca de conversa ou reabre o app (os últimos 200 áudios).
+- **Áudio que você toca** do jeito normal também vira texto embaixo do balão, sem clicar em nada.
+- **"Baixar"** no menu do áudio: o arquivo baixado vira texto e aparece embaixo daquele áudio.
+- Todo texto de áudio passa pela triagem como qualquer mensagem (pedido, pergunta, promessa, compromisso).
+- **Áudio novo em conversa que você não abriu** (achado pela leitura completa, até 36 h, de outra pessoa) aparece no chat da assistente com **🎤 Transcrever** / **Sempre, sozinha** / **Agora não**. "Sempre, sozinha" liga o modo automático (também em Configurações): transcreve sozinho os áudios novos, inclusive os da conversa que você abrir.
 - **Arquivo de áudio que você baixa** (ogg, mp3, m4a, wav) também vira texto.
 - O áudio e a transcrição (.txt) ficam no Drive, em `WhatsApp v1/<conversa>/`, e o texto entra no histórico `Conversas/<conversa>.md` com "🎤 (áudio 0:42)".
 - Custo (Groq, out/2026): tem plano gratuito com limite; acima dele, US$ 0,04 por hora de áudio, cobrança mínima de 10 s por áudio. Alternativa: OpenAI (gpt-4o-mini-transcribe), com chave da OpenAI.

@@ -122,7 +122,7 @@ async function readOpen(unread) {
     if (p) { p.scrollTop = Math.max(0, p.scrollTop - 1500); await sleep(700); const b = scanOpenChat(); if (b) batches.push(b); }
   }
   if (batches.length) ipcRenderer.sendToHost('wa-msgs', batches);
-  const au = scanAudios(); if (au) ipcRenderer.sendToHost('wa-audio-seen', au);
+  const au = scanAudios(true); if (au) ipcRenderer.sendToHost('wa-audio-seen', au);
   await scanMedia();
 }
 
@@ -244,6 +244,11 @@ const PAGE_HOOK = `(() => {
     }
     try { return P.apply(this, arguments); } finally { grab(el, cap).catch(() => {}); }
   };
+  const AC = window.BaseAudioContext || window.AudioContext, DA = AC && AC.prototype.decodeAudioData;
+  if (DA) AC.prototype.decodeAudioData = function (buf) { // se o WhatsApp tocar pelo Web Audio: pega o arquivo (só Ogg/Opus, que é o formato da mensagem de voz)
+    try { if (buf && buf.byteLength > 2000 && String.fromCharCode(...new Uint8Array(buf, 0, 4)) === 'OggS') { const cap = capUntil > Date.now(); if (cap) capUntil = 0; window.postMessage({ __wv1: 'audio', blob: new Blob([buf.slice(0)], { type: 'audio/ogg' }), type: 'audio/ogg', dur: 0, cap, via: 'decode' }, '*'); } } catch (e) {}
+    return DA.apply(this, arguments);
+  };
   window.addEventListener('message', e => { if (e.source === window && e.data && e.data.__wv1 === 'capture') capUntil = Date.now() + (e.data.ms || 12000); });
 })();`;
 function hookPage() { try { if (typeof webFrame !== 'undefined' && webFrame && webFrame.executeJavaScript) webFrame.executeJavaScript(PAGE_HOOK).catch(() => {}); } catch {} }
@@ -251,7 +256,8 @@ hookPage(); document.addEventListener('DOMContentLoaded', hookPage);
 
 let audioOn = false, lastRow = null, lastRowAt = 0;
 const capWait = [], audSent = new Set();
-document.addEventListener('click', e => { const r = e.target && e.target.closest && e.target.closest('#main div[data-id]'); if (r) { lastRow = r; lastRowAt = Date.now(); } }, true);
+const markRow = e => { if (!e.isTrusted) return; /* só o seu clique: os da leitura e do "Transcrever" são sintéticos */ const r = e.target && e.target.closest && e.target.closest('#main div[data-id]'); if (r) { lastRow = r; lastRowAt = Date.now(); } };
+document.addEventListener('click', markRow, true); document.addEventListener('contextmenu', markRow, true);
 const AUD_SEL = '[data-icon*="audio-play"], [data-icon*="ptt-play"], [data-icon*="audio-download"], [data-icon*="ptt-download"], button[aria-label*="voz" i], button[aria-label*="voice" i], button[aria-label*="áudio" i], button[aria-label*="audio" i], audio';
 const PLAY_SEL = '[data-icon*="audio-play"], [data-icon*="ptt-play"], button[aria-label*="Reproduzir" i], button[aria-label*="Play" i], [data-icon*="audio-download"], [data-icon*="ptt-download"]';
 function isAudioRow(row) {
@@ -284,7 +290,7 @@ function rowMeta(row) { // mesmo formato do data-pre-plain-text: "[14:32, 29/10/
   const who = id.startsWith('true_') ? 'Eu' : (groupSender(id) || chatName());
   return `[${p(d.getHours())}:${p(d.getMinutes())}, ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}] ${who}: `;
 }
-function scanAudios() { // áudios que aparecem na conversa aberta (o app decide se pergunta, transcreve ou ignora)
+function scanAudios(sweep) { // áudios que aparecem na conversa aberta (o app decide se pergunta, transcreve ou ignora)
   const main = $('#main'); if (!main || !audioOn) return null;
   const out = [];
   for (const row of main.querySelectorAll('div[data-id]')) {
@@ -293,7 +299,7 @@ function scanAudios() { // áudios que aparecem na conversa aberta (o app decide
     audSent.add(id);
     out.push({ id, meta: rowMeta(row), out: id.startsWith('true_'), dur: rowDur(row) });
   }
-  return out.length ? { chat: chatName(), audios: out } : null;
+  return out.length ? { chat: chatName(), audios: out, sweep: !!sweep } : null;
 }
 function fnv(buf) { let h = 0x811c9dc5; for (let i = 0; i < buf.length; i++) { h ^= buf[i]; h = Math.imul(h, 0x01000193) >>> 0; } return buf.length.toString(36) + '-' + h.toString(36); }
 window.addEventListener('message', async e => {
@@ -301,12 +307,15 @@ window.addEventListener('message', async e => {
   if (e.source !== window || !d || d.__wv1 !== 'audio') return;
   const w = d.cap ? capWait.find(x => x.until > Date.now()) : null;
   if (!audioOn && !w) return;
-  const row = w ? w.row : (Date.now() - lastRowAt < 20000 && lastRow && lastRow.isConnected ? lastRow : null);
+  const recent = lastRow && lastRow.isConnected && Date.now() - lastRowAt < (d.via === 'decode' ? 6000 : 20000) ? lastRow : null;
+  if (!w && d.via === 'decode' && !(recent && isAudioRow(recent))) return; // som do próprio WhatsApp, não é mensagem de voz
+  const row = w ? w.row : recent;
   const id = row ? row.getAttribute('data-id') || '' : '';
   try {
     const blob = d.blob instanceof Blob ? d.blob : await (await fetch(d.src)).blob();
     const buf = new Uint8Array(await blob.arrayBuffer());
     ipcRenderer.sendToHost('wa-audio', { id, hash: fnv(buf), chat: chatName(), meta: row ? rowMeta(row) : '', out: id.startsWith('true_'), dur: Math.round(d.dur || (row ? rowDur(row) : 0)), type: d.type || blob.type, buf, req: !!w });
+    if (id && !(audTexts.get(id) || {}).text) setAud(id, { busy: 1 });
   } catch (err) { /* blob já descartado: fica para a próxima vez que tocar */ }
   if (w) { capWait.splice(capWait.indexOf(w), 1); w.resolve(true); }
 });
@@ -338,7 +347,77 @@ async function captureAudios(o) {
   if (orig && orig !== o.chat) { try { await findAndOpen(orig); } catch {} }
   return { ok: true, got, miss };
 }
-ipcRenderer.on('wa-audio-cfg', (_, o) => { audioOn = !!(o && o.on); });
+// ---------- transcrição dentro da conversa: botão "🎤 Transcrever" e o texto logo abaixo do balão do áudio ----------
+// O WhatsApp recria as linhas ao rolar ou trocar de conversa; o texto fica guardado aqui (e no app) e é recolocado.
+const audTexts = new Map();
+function setAud(id, st) {
+  if (!id) return; audTexts.set(id, st); if (audTexts.size > 600) audTexts.delete(audTexts.keys().next().value); paintSoon();
+  if (st.busy) setTimeout(() => { if (audTexts.get(id) === st) setAud(id, { erro: 'demorou demais' }); }, 120e3); // nunca fica preso em "Transcrevendo…"
+}
+const isDark = () => !!(document.body && document.body.classList.contains('dark'));
+function boxFor(row, id) {
+  let box = [...row.children].find(c => c.getAttribute && c.getAttribute('data-wv1t') === id);
+  if (!box) {
+    box = document.createElement('div'); box.setAttribute('data-wv1t', id);
+    box.style.cssText = `display:flex;justify-content:${id.startsWith('true_') ? 'flex-end' : 'flex-start'};padding:2px 63px 8px;box-sizing:border-box;width:100%`;
+    box.addEventListener('click', e => { const b = e.target.closest('[data-wv1go]'); if (!b) return; e.stopPropagation(); e.preventDefault(); inplace(row); }, true);
+    row.appendChild(box);
+  }
+  return box;
+}
+const escH = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function paintRow(row) {
+  const id = row.getAttribute('data-id'); if (!id || !isAudioRow(row)) return;
+  const st = audTexts.get(id) || {}, key = st.text ? 't:' + st.text.length : st.busy ? 'b' : st.erro ? 'e:' + st.erro : audioOn ? 'n' : '';
+  const old = [...row.children].find(c => c.getAttribute && c.getAttribute('data-wv1t') === id);
+  if (!key) { if (old) old.remove(); return; }
+  if (old && old.getAttribute('data-k') === key + isDark()) return;
+  const box = boxFor(row, id); box.setAttribute('data-k', key + isDark());
+  const dk = isDark(), card = `max-width:min(65%,560px);background:${dk ? '#202c33' : '#ffffff'};color:${dk ? '#e9edef' : '#111b21'};border-left:3px solid #25d366;border-radius:7.5px;padding:6px 10px;font-size:13.5px;line-height:19px;box-shadow:0 1px .5px rgba(11,20,26,.13);white-space:pre-wrap;user-select:text`;
+  const btn = `background:${dk ? '#005c4b' : '#d9fdd3'};color:${dk ? '#e9edef' : '#008069'};border:0;border-radius:12px;padding:3px 10px;font-size:12.5px;font-weight:600;cursor:pointer`;
+  box.innerHTML = st.text ? `<div style="${card}"><span style="font-size:11.5px;color:#25d366;font-weight:600">🎤 Transcrição</span><br><span style="font-style:italic">${escH(st.text)}</span></div>`
+    : st.busy ? `<div style="${card};color:${dk ? '#8696a0' : '#667781'}">🎤 Transcrevendo…</div>`
+    : st.erro ? `<div style="${card}">⚠️ Não transcrevi: ${escH(st.erro)} <button data-wv1go="1" style="${btn}">Tentar de novo</button></div>`
+    : `<button data-wv1go="1" style="${btn}" title="Toca o áudio sem som e mostra o texto aqui. Quem mandou vê como ouvido.">🎤 Transcrever</button>`;
+}
+function paintAll() { const main = $('#main'); if (!main) return; for (const row of main.querySelectorAll('div[data-id]')) { try { paintRow(row); } catch {} } }
+let paintT = 0; function paintSoon() { clearTimeout(paintT); paintT = setTimeout(paintAll, 150); }
+const ours = n => n.nodeType === 1 ? n.hasAttribute('data-wv1t') || !!n.closest('[data-wv1t]') : !!(n.parentElement && n.parentElement.closest('[data-wv1t]'));
+new MutationObserver(muts => { if (muts.some(m => m.addedNodes.length && !ours(m.target) && ![...m.addedNodes].every(ours))) paintSoon(); })
+  .observe(document, { childList: true, subtree: true }); // document: o preload roda antes de existir o <html>
+let inq = Promise.resolve();
+function inplace(row) { // você clicou em "🎤 Transcrever" embaixo do áudio (ou o modo "sempre, sozinha" pediu): um por vez
+  const id = row.getAttribute('data-id'); setAud(id, { busy: 1 });
+  return (inq = inq.then(() => inplace1(row, id)).catch(() => {}));
+}
+async function inplace1(row, id) {
+  if (!row.isConnected) row = rowById(id) || row;
+  const btn = playBtn(row);
+  if (!btn) { setAud(id, { erro: 'não achei o botão de tocar' }); return; }
+  const ok = await new Promise(res => {
+    const w = { row, id, resolve: res, until: Date.now() + 15000 }; capWait.push(w);
+    window.postMessage({ __wv1: 'capture', ms: 15000 }, '*'); fire(btn);
+    setTimeout(() => { const k = capWait.indexOf(w); if (k >= 0) { capWait.splice(k, 1); res(false); } }, 15000);
+  });
+  if (!ok) setAud(id, { erro: 'o áudio não carregou' });
+}
+const fileRow = new Map(); // arquivo baixado pelo "Baixar" -> áudio em que você clicou antes
+ipcRenderer.on('wa-audio-text', (_, o) => { // resposta do app: texto, erro, "transcrevendo" ou "nada a fazer"
+  o = o || {};
+  let id = o.id;
+  if (!id && o.recent) {
+    id = fileRow.get(o.key);
+    if (!id && lastRow && lastRow.isConnected && Date.now() - lastRowAt < 180e3 && isAudioRow(lastRow)) { id = lastRow.getAttribute('data-id'); fileRow.set(o.key, id); }
+    if (id && o.text) { fileRow.delete(o.key); ipcRenderer.sendToHost('wa-audio-bind', { id, key: o.key, text: o.text }); }
+  }
+  if (!id) return;
+  if (o.text) setAud(id, { text: o.text }); else if (o.busy) setAud(id, { busy: 1 }); else if (o.erro) setAud(id, { erro: o.erro }); else { audTexts.delete(id); paintSoon(); }
+});
+ipcRenderer.on('wa-audio-auto', async (_, ids) => { // modo "sempre, sozinha": transcreve os áudios novos da conversa aberta, ali mesmo
+  for (const id of ids || []) { const row = rowById(id), st = audTexts.get(id) || {}; if (row && !st.text && !st.busy) inplace(row); }
+});
+ipcRenderer.on('wa-audio-texts', (_, list) => { for (const [id, text] of list || []) if (id && text) audTexts.set(id, { text }); paintSoon(); });
+ipcRenderer.on('wa-audio-cfg', (_, o) => { audioOn = !!(o && o.on); paintSoon(); });
 ipcRenderer.on('wa-audio-get', async (_, o) => { o = o || {}; let r; try { r = await captureAudios(o); } catch (e) { r = { ok: false, erro: e.message }; } ipcRenderer.sendToHost('wa-audio-done', { reqId: o.reqId, chat: o.chat, ...r }); });
 
 setInterval(() => {
@@ -350,5 +429,6 @@ setInterval(() => {
     if (open) batches.push(open);
     if (batches.length) ipcRenderer.sendToHost('wa-msgs', batches);
     const au = scanAudios(); if (au) ipcRenderer.sendToHost('wa-audio-seen', au);
+    paintAll();
   } catch (e) { /* o WhatsApp mudou o site: ignora e tenta de novo */ }
 }, 5000);

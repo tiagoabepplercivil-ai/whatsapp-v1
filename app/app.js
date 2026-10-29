@@ -1405,6 +1405,11 @@ const audDone = new Set(db.meta.audioDone || []), audBusy = new Set(), audQueue 
 var audN = 0, audPumping = false; // var: o painel lê antes desta linha rodar
 function audMark(...keys) { keys.filter(Boolean).forEach(k => audDone.add(k)); db.meta.audioDone = [...audDone].slice(-4000); }
 function audCfg() { try { waWv && waWv.send('wa-audio-cfg', { on: sttOn() }); } catch {} }
+// textos dos áudios, para mostrar embaixo de cada balão na conversa (o WhatsApp recria as linhas; o leitor recoloca)
+const audTx = new Map(db.meta.audTx || []), audBound = new Set();
+function audKeep(keys, text) { for (const k of keys.filter(Boolean)) { audTx.delete(k); audTx.set(k, String(text).slice(0, 2500)); } while (audTx.size > 200) audTx.delete(audTx.keys().next().value); db.meta.audTx = [...audTx]; }
+function audTell(o) { try { waWv && waWv.send('wa-audio-text', o); } catch {} }
+function audTxSync() { try { waWv && waWv.send('wa-audio-texts', [...audTx].filter(([k]) => !/^[hf]:/.test(k))); } catch {} }
 function audCards() { return db.chats.find(c => c.id === 'claude').messages.filter(m => m.card && m.card.type === 'aud'); }
 function audUpdate(id, patch) { // atualiza os cartões que têm esse áudio
   if (!id) return;
@@ -1425,6 +1430,10 @@ function audioSeen(a) {
   const fresh = (a.audios || []).filter(x => x.id && !x.out && !audDone.has(x.id) && !asked.has(x.id) && waTs(x.meta).d.getTime() >= cutoff);
   if (!fresh.length) return;
   db.meta.audioAsked = [...asked, ...fresh.map(x => x.id)].slice(-3000);
+  if (!a.sweep) { // conversa aberta na sua frente: o botão "🎤 Transcrever" já está embaixo de cada áudio; no modo sozinha, transcreve ali mesmo
+    save(); if (db.settings.sttAuto) try { waWv.send('wa-audio-auto', fresh.map(x => x.id)); } catch {}
+    return;
+  }
   const items = fresh.map(x => { const t = waTs(x.meta); return { id: x.id, dur: x.dur || 0, who: t.who, when: localISO(t.d) }; });
   const st = db.settings.sttAuto ? 'transcrevendo' : 'pendente'; // modo sozinha: o cartão já nasce "transcrevendo" e mostra o texto quando sai
   const m = audCards().reverse().find(x => x.card.chat === a.chat && x.card.status === st);
@@ -1452,9 +1461,13 @@ async function audPump() {
   } finally { audPumping = false; }
 }
 async function onWaAudio(a) {
-  if (!a || !a.buf || !sttOn()) return;
+  if (!a || !a.buf || !sttOn()) { if (a && a.id) audTell({ id: a.id }); return; }
   const hk = 'h:' + a.hash, key = a.id || hk;
-  if (audDone.has(hk) || (a.id && audDone.has(a.id))) { if (a.id) { const old = audCards().flatMap(m => m.card.items).find(x => x.id === a.id && x.text); if (old) audUpdate(a.id, null); } return; }
+  const old = audTx.get(a.id) || audTx.get(hk) || (a.id && (audCards().flatMap(m => m.card.items).find(x => x.id === a.id && x.text) || {}).text);
+  if ((audDone.has(hk) || (a.id && audDone.has(a.id))) && (old || !a.req)) { // já transcrito: só devolve o texto para aparecer embaixo do áudio
+    if (a.id) { if (old) audKeep([a.id], old); audTell({ id: a.id, text: old || '' }); audUpdate(a.id, null); }
+    return;
+  }
   if (audBusy.has(key)) return;
   audBusy.add(key); audN++; renderSide();
   const t = a.meta ? waTs(a.meta) : { d: new Date(), who: '' };
@@ -1462,27 +1475,30 @@ async function onWaAudio(a) {
   try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: db.settings.sttKey.trim(), buf: a.buf, type: a.type, chat: a.chat, when: t.d.toISOString(), prompt: STT_PROMPT }); }
   catch (e) { r = { error: e.message }; }
   audBusy.delete(key); audN--; renderSide();
-  if (!r || r.error) { audUpdate(a.id, { erro: (r && r.error) || 'falhou' }); toast('🎤 Não transcrevi o áudio: ' + ((r && r.error) || 'falhou')); return; }
+  if (!r || r.error) { const erro = (r && r.error) || 'falhou'; audUpdate(a.id, { erro }); if (a.id) audTell({ id: a.id, erro }); else toast('🎤 Não transcrevi o áudio: ' + erro); return; }
   audMark(key, hk);
   const text = r.text || '(sem fala reconhecível)';
+  audKeep([a.id, hk], text); if (a.id) audTell({ id: a.id, text });
   const meta = a.meta || `[${pad(t.d.getHours())}:${pad(t.d.getMinutes())}, ${pad(t.d.getDate())}/${pad(t.d.getMonth() + 1)}/${t.d.getFullYear()}] ${a.chat}: `;
   ingestWa([{ chat: a.chat, msgs: [{ id: 'a:' + key, meta, out: a.out, audio: true, text: `🎤 (áudio${a.dur ? ' ' + fmtDur(a.dur) : ''}) ${text}` }] }]);
   audUpdate(a.id, { text });
   if (waQueue.length && a.req) waSchedule(3000, true); // pedido por ele: triagem logo
-  if (!a.req) toast(`🎤 Áudio${a.chat ? ' de ' + a.chat : ''} virou texto`);
+  if (!a.req && !a.id) toast(`🎤 Áudio${a.chat ? ' de ' + a.chat : ''} virou texto`); // com id o texto já aparece embaixo do áudio
   save();
 }
 // arquivo de áudio baixado no WhatsApp (ogg, mp3, m4a…) também vira texto
 async function audFile(d) {
   const key = 'f:' + d.downloads; if (audDone.has(key)) return;
-  audN++; renderSide();
+  audN++; renderSide(); audTell({ recent: true, key, busy: true });
   let r; try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: db.settings.sttKey.trim(), file: d.downloads, save: false, prompt: STT_PROMPT }); } catch (e) { r = { error: e.message }; }
   audN--; renderSide();
-  if (!r || r.error) return toast('🎤 Não transcrevi ' + d.name + ': ' + ((r && r.error) || 'falhou'));
-  audMark(key);
+  if (!r || r.error) { audTell({ recent: true, key, erro: (r && r.error) || 'falhou' }); return toast('🎤 Não transcrevi ' + d.name + ': ' + ((r && r.error) || 'falhou')); }
+  audMark(key); audKeep([key], r.text || '(sem fala reconhecível)'); audTell({ recent: true, key, text: r.text || '(sem fala reconhecível)' });
+  await new Promise(res => setTimeout(res, 2500)); // o texto foi para embaixo do áudio em que você clicou "Baixar"? então não repete no painel
+  const bound = audBound.has(key);
   const now = new Date(), chat = d.chat || 'Áudios baixados', meta = `[${pad(now.getHours())}:${pad(now.getMinutes())}, ${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}] ${chat}: `;
   ingestWa([{ chat, msgs: [{ id: key, meta, audio: true, text: `🎤 (arquivo de áudio ${d.name}) ${r.text || '(sem fala)'}` }] }]);
-  pushMsg('claude', { from: 'them', text: `🎤 ${d.name}${d.chat ? ' · ' + d.chat : ''}\n“${r.text || '(sem fala reconhecível)'}”` });
+  if (!bound) pushMsg('claude', { from: 'them', text: `🎤 ${d.name}${d.chat ? ' · ' + d.chat : ''}\n“${r.text || '(sem fala reconhecível)'}”` });
   save();
 }
 
@@ -1600,11 +1616,12 @@ if (DESK) {
     if (d.downloads && !d.appFile && /\.(ogg|opus|mp3|m4a|wav|flac|mpga)$/i.test(d.name || '') && sttOn()) audFile(d);
   });
   waWv = wv;
-  wv.addEventListener('dom-ready', audCfg);
+  wv.addEventListener('dom-ready', () => { audCfg(); audTxSync(); });
   wv.addEventListener('ipc-message', e => {
     if (e.channel === 'wa-msgs') ingestWa(e.args[0]);
     if (e.channel === 'wa-audio-seen') audioSeen(e.args[0]);
     if (e.channel === 'wa-audio') onWaAudio(e.args[0]);
+    if (e.channel === 'wa-audio-bind') { const b = e.args[0] || {}; if (b.id && b.text) { audKeep([b.id], b.text); audMark(b.id); if (b.key) audBound.add(b.key); save(); } }
     if (e.channel === 'wa-audio-done') { const r = e.args[0] || {}; const w = audWaiters[r.reqId]; if (w) { delete audWaiters[r.reqId]; w(r); } }
     if (e.channel === 'wa-sent') { const r = e.args[0] || {}; const w = waSendWaiters[r.id]; if (w) { delete waSendWaiters[r.id]; w(r); } }
     if (e.channel === 'wa-sweep') {
