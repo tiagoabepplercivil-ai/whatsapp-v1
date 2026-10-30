@@ -1,7 +1,7 @@
 {
-  "ui": "1.9.1",
+  "ui": "1.9.2",
   "desktop": "1.9.0",
-  "notes": "📲 Sua conversa com você mesmo (\"Tiago (você)\") ligada à assistente: o que você manda lá (texto ou áudio) vira lembrete, compromisso, atividade ou nota, e ela responde lá. Briefing, lembretes e resumo da semana chegam lá também. Mensagem para outra pessoa continua só com o seu ok.",
+  "notes": "Novidade que você pediu (o atalho está na conversa do projeto) e ajustes na ligação com a sua conversa com você mesmo.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",

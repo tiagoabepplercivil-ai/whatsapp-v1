@@ -324,6 +324,57 @@ input,textarea,select{font:inherit;color:var(--text)}
 .selfbar button{font-size:12.5px;font-weight:600;color:var(--teal);background:var(--panel);border-radius:14px;padding:3px 10px;flex:none}
 .selfbar:empty,.side:not(.vchat) .selfbar{display:none}
 .sidetabs .vt+.vt{margin-left:0}
+/* 🌱 espaço pessoal (escondido) */
+.psi{position:fixed;inset:0;z-index:9000;background:rgba(11,20,26,.55);display:flex;align-items:stretch;justify-content:center;padding:24px}
+.psi[hidden]{display:none}
+.psi-box{width:100%;max-width:860px;background:var(--bg);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+.psi-lock{max-width:380px;height:auto;align-self:center}
+.psi-h{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);flex:none}
+.psi-h>b{font-size:16px;color:#3f7d58;margin-right:6px}
+.psi-h>button{font-size:16px;padding:4px 8px;border-radius:8px;color:var(--muted)}
+.psi-h>button:hover{background:var(--panel)}
+.psi-tabs{display:flex;gap:4px;flex:1;flex-wrap:wrap}
+.psi-tabs button{padding:5px 12px;border-radius:16px;font-size:13px;font-weight:600;color:var(--muted)}
+.psi-tabs button.on{background:#e3f1e8;color:#25553a}
+.psi-note{font-size:12px;line-height:17px;color:var(--muted);padding:7px 16px;background:var(--panel);flex:none}
+.psi-msgs,.psi-scroll{flex:1;min-height:0;overflow-y:auto;padding:14px 16px}
+.psi-msgs{background:var(--chatbg)}
+.psi-m{display:flex;flex-direction:column;align-items:flex-start;margin:6px 0}
+.psi-m>div{max-width:78%;background:var(--in);padding:8px 11px;border-radius:9px;white-space:pre-wrap;line-height:20px;box-shadow:0 1px .5px rgba(11,20,26,.13)}
+.psi-m.me{align-items:flex-end}.psi-m.me>div{background:#e3f1e8}
+.psi-m i{font-style:normal;font-size:11px;color:var(--muted);margin:2px 4px}
+.psi-empty{color:var(--muted);font-size:14px;line-height:21px;max-width:560px;margin:20px auto;text-align:center}
+.psi-risk{background:#fdecea;color:#7a1c14;padding:10px 16px;font-size:13.5px;line-height:19px;font-weight:600;flex:none}
+.psi-compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line);flex:none}
+.psi-compose textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--bg)}
+.psi button.ok,.psi-gb button,.psi-gb2 button,.psi-form>button,.psi-pin button{font-size:13px;font-weight:600;padding:6px 14px;border-radius:16px;background:var(--panel);color:#25553a}
+.psi button.ok{background:#3f7d58;color:#fff}
+.psi button.warn{background:#b3261e;color:#fff;font-size:13px;font-weight:600;padding:6px 14px;border-radius:16px}
+.psi-form{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--line);border-radius:10px;margin-bottom:12px}
+.psi-form label{display:flex;align-items:center;gap:8px;font-size:13.5px;flex-wrap:wrap}
+.psi-form label input[type=range]{flex:1;min-width:160px}
+.psi-form input:not([type=range]):not([type=checkbox]),.psi-form textarea,.psi-form select{border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--bg)}
+.psi-form textarea{resize:vertical}
+.psi input[type=range],.psi input[type=checkbox]{accent-color:#3f7d58}
+.psi-form>button{align-self:flex-start}
+.psi-cfg label input:not([type=checkbox]){flex:1;min-width:120px}
+.psi-ck{font-size:13px!important;color:var(--muted)}
+.psi-d{border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:8px;font-size:14px;line-height:20px;white-space:pre-wrap}
+.psi-dh{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);white-space:normal;flex-wrap:wrap}
+.psi-dh b{color:var(--text);font-size:14px}
+.psi-dh>button,.psi-x{margin-left:auto;color:var(--muted);font-size:12px;padding:2px 6px}
+.psi-x{margin-left:6px}
+.psi-gb{margin-left:auto;display:flex;gap:6px}
+.psi-gb2{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.psi-mu{color:var(--muted);font-size:13px}
+.psi-hint{font-size:12.5px;color:var(--muted);line-height:18px}
+.psi-err{color:#b3261e;font-size:13px;margin-top:6px}
+#psiDraft{width:100%;margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:var(--bg);font-size:13.5px;line-height:19px;resize:vertical}
+.psi-pin{display:flex;gap:8px;padding:22px 16px;flex-wrap:wrap}
+.psi-pin input{flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:18px;letter-spacing:4px;background:var(--bg)}
+.psi-pin .psi-err{width:100%}
+@media (prefers-color-scheme: dark){ .psi-tabs button.on,.psi-m.me>div{background:#1f3a2b;color:#cfe8d8} .psi-h>b{color:#7fc49b} .psi-risk{background:#3b1512;color:#f6c9c3} .psi button.ok{background:#2f6b48} }
+@media (max-width:700px){ .psi{padding:0} .psi-box{border-radius:0} }
 .brain{flex:1;min-height:0;overflow-y:auto;background-color:var(--chatbg);padding:8px 0 10px}
 .bnow{margin:2px 10px 10px;background:var(--card);border-radius:10px;box-shadow:0 1px .5px rgba(11,20,26,.13);padding:10px 12px;border-top:3px solid #7c3aed}
 .bnow .bh{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
@@ -433,6 +484,7 @@ input,textarea,select{font:inherit;color:var(--text)}
 </div>
 <div class="sheet-bg" id="sheetBg"><div class="sheet" id="sheet"></div></div>
 <div class="toast" id="toast"></div>
+<div class="psi" id="psi" hidden></div>
 <script src="app.js"></script>
 </body>
 </html>
