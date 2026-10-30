@@ -370,10 +370,19 @@ input,textarea,select{font:inherit;color:var(--text)}
 .psi-hint{font-size:12.5px;color:var(--muted);line-height:18px}
 .psi-err{color:#b3261e;font-size:13px;margin-top:6px}
 #psiDraft{width:100%;margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:var(--bg);font-size:13.5px;line-height:19px;resize:vertical}
-.psi-pin{display:flex;gap:8px;padding:22px 16px;flex-wrap:wrap}
-.psi-pin input{flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:18px;letter-spacing:4px;background:var(--bg)}
-.psi-pin .psi-err{width:100%}
-@media (prefers-color-scheme: dark){ .psi-tabs button.on,.psi-m.me>div{background:#1f3a2b;color:#cfe8d8} .psi-h>b{color:#7fc49b} .psi-risk{background:#3b1512;color:#f6c9c3} .psi button.ok{background:#2f6b48} }
+.psi-pin{display:flex;flex-direction:column;gap:10px;padding:20px 16px}
+.psi-pin input{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:18px;letter-spacing:3px;background:var(--bg)}
+.psi-pin input::placeholder{letter-spacing:0;font-size:14px}
+.psi-pin>button,.psi-pin .psi-gb2{align-self:flex-start}
+.psi-pin .psi-gb2{margin-top:0}
+.psi-pin .psi-mu{line-height:19px}
+.psi-pin .psi-err:empty{display:none}
+.psi button.psi-lk{background:none;padding:2px 0;font-size:12.5px;font-weight:400;color:var(--muted);text-decoration:underline}
+.psi-ft{font-size:14px;color:#25553a}
+.psi-old{opacity:.75}
+.psi-risk-in{border-radius:10px;margin-top:8px}
+.psi-sesn{margin:-4px 0 12px 2px}
+@media (prefers-color-scheme: dark){ .psi-tabs button.on,.psi-m.me>div{background:#1f3a2b;color:#cfe8d8} .psi-h>b{color:#7fc49b} .psi-risk{background:#3b1512;color:#f6c9c3} .psi button.ok{background:#2f6b48} .psi-ft{color:#7fc49b} }
 @media (max-width:700px){ .psi{padding:0} .psi-box{border-radius:0} }
 .brain{flex:1;min-height:0;overflow-y:auto;background-color:var(--chatbg);padding:8px 0 10px}
 .bnow{margin:2px 10px 10px;background:var(--card);border-radius:10px;box-shadow:0 1px .5px rgba(11,20,26,.13);padding:10px 12px;border-top:3px solid #7c3aed}

@@ -1,7 +1,7 @@
 {
-  "ui": "1.9.2",
+  "ui": "1.9.3",
   "desktop": "1.9.0",
-  "notes": "Novidade que você pediu (o atalho está na conversa do projeto) e ajustes na ligação com a sua conversa com você mesmo.",
+  "notes": "Ajustes no espaço do atalho que você pediu: aba nova e senha. Detalhes na conversa do projeto.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",

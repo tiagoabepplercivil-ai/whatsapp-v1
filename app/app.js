@@ -1262,6 +1262,7 @@ function ingestWa(batches) {
   const cutoff = Date.now() - 36 * 3600e3, toLog = {};
   for (const b of batches || []) {
     if (b.chat && selfLinked() && isSelf(b.chat)) { selfIngest(b); continue; } // 📲 sua conversa com você mesmo: pedido direto à assistente
+    if (b.chat && psiChat(b.chat)) { (b.msgs || []).forEach(m => waSeen.add(m.id)); continue; } // conversa com a psicóloga: fica fora do log, do Drive, da assistente e do Cérebro
     if (!b.chat || ign.some(x => b.chat.toLowerCase().includes(x))) { (b.msgs || []).forEach(m => waSeen.add(m.id)); continue; }
     for (const m of b.msgs || []) {
       if (waSeen.has(m.id)) continue; waSeen.add(m.id);
@@ -1552,7 +1553,7 @@ function audUpdate(id, patch) { // atualiza os cartões que têm esse áudio
 function audIgnored(chat) { const ign = (db.settings.waIgnore || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean); return ign.some(x => String(chat).toLowerCase().includes(x)); }
 // o leitor viu áudios na conversa aberta: os novos (até 36 h, de outra pessoa) viram um cartão "transcrever?" por conversa
 function audioSeen(a) {
-  if (!sttOn() || !a || !a.chat || audIgnored(a.chat)) return;
+  if (!sttOn() || !a || !a.chat || audIgnored(a.chat) || psiChat(a.chat)) return;
   const asked = new Set(db.meta.audioAsked || []), cutoff = Date.now() - 36 * 3600e3, self = selfLinked() && isSelf(a.chat);
   const fresh = (a.audios || []).filter(x => x.id && (!x.out || self) && !audDone.has(x.id) && !asked.has(x.id) && waTs(x.meta).d.getTime() >= cutoff && (!self || localISO(waTs(x.meta).d) >= (db.meta.selfSince || '')));
   if (!fresh.length) return;
@@ -1605,7 +1606,7 @@ async function onWaAudio(a) {
   audBusy.add(key); audN++; renderSide();
   const t = a.meta ? waTs(a.meta) : { d: new Date(), who: '' };
   let r;
-  try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: sttKeyNow(), buf: a.buf, type: a.type, chat: a.chat, when: t.d.toISOString(), prompt: STT_PROMPT, ...(selfLinked() && isSelf(a.chat) ? { save: false } : {}) }); } // ditado para você mesmo não vira arquivo no Drive
+  try { r = await window.wv1desk.stt({ provider: db.settings.sttProvider || 'groq', key: sttKeyNow(), buf: a.buf, type: a.type, chat: a.chat, when: t.d.toISOString(), prompt: STT_PROMPT, ...((selfLinked() && isSelf(a.chat)) || psiChat(a.chat) ? { save: false } : {}) }); } // ditado para você mesmo e áudio da psicóloga não viram arquivo no Drive
   catch (e) { r = { error: e.message }; }
   audBusy.delete(key); audN--; renderSide();
   if (!r || r.error) { const erro = (r && r.error) || 'falhou'; audUpdate(a.id, { erro }); if (a.id) audTell({ id: a.id, erro }); else toast('🎤 Não transcrevi o áudio: ' + erro); return; }
@@ -2006,8 +2007,9 @@ function feedPlain(f) { const sub = feedSub(f); return [f.head ? '*' + f.head + 
 // ---------- 🌱 Espaço pessoal (escondido: Ctrl+Shift+Y): conselheira de desenvolvimento pessoal, diário, metas e o resumo da semana para a psicóloga ----------
 // Fica só neste PC, numa gaveta separada do resto (fora do db): não entra na assistente, no Cérebro, no Drive nem no backup.
 // Não é terapia. O resumo só vai para a psicóloga quando ele revisa e confirma o envio.
-var PSI_KEY = 'wv1-psi', psiOpen = false, psiUnlocked = false, psiTab = 'conversa', psiBusy = false, psiIdleT = null, psiConfirm = false, psiErr = '';
+var PSI_KEY = 'wv1-psi', psiOpen = false, psiUnlocked = false, psiTab = 'psicologa', psiBusy = false, psiIdleT = null, psiConfirm = false, psiErr = '', psiFails = 0, psiWait = 0, psiForgot = false;
 var PSI_RE = /^(?:🎤 \([^)]*\)\s*)?#?\s*(?:psi|psy|p\.\s?s\.\s?i)(?![a-zà-ú])[\s.,:;!-]*/i; // "psi …" na sua conversa com você mesmo (o áudio vem com "🎤 (áudio 0:12)" na frente)
+var PSI_SES_RE = /^(?:pra |para (?:a )?)?(?:sess[aã]o|levar|psic[oó]loga|terapia)(?![a-zà-ú])[\s.,:;!-]*/i; // "psi sessão …": vai para a aba Psicóloga
 var PSI_RISK = /(me matar|suic[ií]d|n[aã]o (quero|aguento) mais viver|vontade de morrer|queria (estar )?morr|acabar com (a )?minha vida|tirar (a )?minha (pr[oó]pria )?vida|me machucar|me cortar|sumir (de vez|pra sempre)|n[aã]o vejo sa[ií]da)/i;
 var PSI_HELP = 'Se você está pensando em se machucar ou em morrer, fale agora com alguém: CVV 188 (ligação gratuita, 24 h, ou chat em cvv.org.br), a sua psicóloga, ou o SAMU 192 se houver perigo imediato. Se puder, chame alguém de confiança para ficar com você.';
 var PSI_DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
@@ -2019,6 +2021,9 @@ function psiLoad() {
 }
 var psi = psiLoad();
 function psiSave() { try { localStorage.setItem(PSI_KEY, JSON.stringify(psi)); } catch { toast('Memória cheia'); } }
+function psiChat(chat) { const n = selfKey(psi.cfg.nome); return !!n && selfKey(chat) === n; } // a conversa com a psicóloga no WhatsApp
+function psiPurge() { const n = db.waLog.length; db.waLog = db.waLog.filter(m => !psiChat(m.chat)); if (db.waLog.length !== n) save(); } // tira do log do app o que já tinha sido lido dela
+psiPurge();
 function psiNums(t) { // "psi humor 6, estresse 8, dormi 5h" → números do diário
   const o = {}, n = re => { const m = String(t).match(re); return m ? Math.max(0, Math.min(10, parseFloat(m[1].replace(',', '.')))) : null; };
   const h = n(/humor\s*(?:de|:|=|em)?\s*(\d+(?:[.,]\d)?)/i), en = n(/energia\s*(?:de|:|=|em)?\s*(\d+(?:[.,]\d)?)/i), es = n(/estresse\s*(?:de|:|=|em)?\s*(\d+(?:[.,]\d)?)/i);
@@ -2026,13 +2031,15 @@ function psiNums(t) { // "psi humor 6, estresse 8, dormi 5h" → números do di�
   if (h != null) o.humor = h; if (en != null) o.energia = en; if (es != null) o.estresse = es; if (sn) o.sono = Math.min(16, parseFloat(sn[1].replace(',', '.')));
   return o;
 }
-function psiFromSelf(body, when, audio) { // veio da conversa "Tiago (você)" começando com psi: vai só para o diário
+function psiFromSelf(body, when, audio) { // veio da conversa "Tiago (você)" começando com psi: vai só para o espaço pessoal
   body = String(body || '').trim(); if (!body) return;
-  psi.diary.push({ id: uid(), ts: when, texto: body.slice(0, 2000), via: audio ? '📲 🎤' : '📲', ...psiNums(body) });
+  const ses = PSI_SES_RE.test(body), raw = body; if (ses) body = body.replace(PSI_SES_RE, '').trim(); if (!body) return;
+  if (ses) psi.sessao.push({ id: uid(), ts: when, texto: body.slice(0, 2000), via: audio ? '📲 🎤' : '📲' }); // "psi sessão …": aba Psicóloga
+  else psi.diary.push({ id: uid(), ts: when, texto: body.slice(0, 2000), via: audio ? '📲 🎤' : '📲', ...psiNums(body) });
   if (psi.diary.length > 1500) psi.diary.splice(0, psi.diary.length - 1500);
   psiSave(); if (psiOpen) psiRender();
-  if (audio) { for (const [k, v] of [...audTx]) if (v && v.includes(body.slice(0, 40))) audTx.delete(k); db.meta.audTx = [...audTx]; } // o texto do áudio também não fica no app
-  selfSend('🌱 Guardei no seu espaço pessoal.', 'reply');
+  if (audio) { for (const [k, v] of [...audTx]) if (v && (v.includes(raw.slice(0, 40)) || v.includes(body.slice(0, 40)))) audTx.delete(k); db.meta.audTx = [...audTx]; } // o texto do áudio também não fica no app
+  selfSend(ses ? '🌱 Anotei para a sessão.' : '🌱 Guardei no seu espaço pessoal.', 'reply');
 }
 const psiAvg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length * 10) / 10 : null;
 function psiWeek() { // últimos 7 dias
@@ -2055,7 +2062,7 @@ function psiContext() {
   const goals = psi.goals.map(g => `- [${g.id}] ${g.titulo} (${g.status})${g.porque ? ' — porque: ' + g.porque : ''}${(g.passos || []).length ? ' — passos: ' + g.passos.join('; ') : ''}${(g.notas || []).length ? ' — avanços: ' + g.notas.slice(-3).map(n => n.texto).join(' | ') : ''}`);
   return [`Agora: ${localISO(new Date())} (${new Date().toLocaleDateString('pt-BR', { weekday: 'long' })}).`,
     `## Diário dele (mais recentes)\n${diary.join('\n') || '(vazio)'}`, `## Metas\n${goals.join('\n') || '(nenhuma)'}`,
-    `## Temas que ele quer levar à sessão\n${psi.sessao.filter(x => !x.usado).map(x => '- ' + x.texto).join('\n') || '(nenhum)'}`,
+    `## O que ele lançou para levar à sessão\n${psi.sessao.filter(x => !x.usado).map(x => `- (${brDay(x.ts.slice(0, 10))}) ${x.texto}`).join('\n') || '(nada)'}`,
     `## Números dos últimos 7 dias\n- diário: ${psiNumLine(W) || 'sem números'}\n- ${W.evs} compromisso(s) na agenda; ${W.feitas} atividade(s) concluída(s); ${W.atrasadas} atrasada(s) agora\n- ${W.mine} mensagem(ns) dele no WhatsApp, ${W.late} entre 22 h e 6 h`].join('\n\n');
 }
 function psiSystem() {
@@ -2077,7 +2084,7 @@ var PSI_TOOLS = [
 function psiTool(name, i) {
   if (name === 'criar_meta') { const g = { id: uid(), titulo: String(i.titulo || '').slice(0, 160), porque: i.porque || '', passos: (i.passos || []).slice(0, 8), status: 'ativa', notas: [], criado: localISO(new Date()) }; psi.goals.push(g); return { ok: true, id: g.id }; }
   if (name === 'atualizar_meta') { const g = psi.goals.find(x => x.id === i.id); if (!g) return { erro: 'meta não encontrada' }; if (i.nota) g.notas.push({ ts: localISO(new Date()), texto: i.nota }); if (i.status) g.status = i.status; if (Array.isArray(i.passos)) g.passos = i.passos.slice(0, 8); return { ok: true }; }
-  if (name === 'anotar_para_sessao') { psi.sessao.push({ ts: localISO(new Date()), texto: String(i.texto || '').slice(0, 400) }); return { ok: true }; }
+  if (name === 'anotar_para_sessao') { psi.sessao.push({ id: uid(), ts: localISO(new Date()), texto: String(i.texto || '').slice(0, 400), via: '💬' }); return { ok: true }; }
   return { erro: 'ferramenta desconhecida' };
 }
 async function psiAsk() {
@@ -2103,8 +2110,7 @@ var PSI_DRAFT_SCHEMA = { type: 'object', properties: {
   como_estive: { type: 'string', description: '2 a 4 frases em primeira pessoa sobre como foi a semana' },
   temas: { type: 'array', items: { type: 'string' }, description: 'temas que voltaram na semana' },
   situacoes: { type: 'array', items: { type: 'string' }, description: 'situações marcantes, com as palavras dele entre aspas quando ajudar' },
-  metas: { type: 'array', items: { type: 'string' }, description: 'como andaram as metas' },
-  para_sessao: { type: 'array', items: { type: 'string' }, description: 'o que ele quer levar para a sessão' } } };
+  metas: { type: 'array', items: { type: 'string' }, description: 'como andaram as metas' } } };
 async function psiDraft(auto) {
   if (psiBusy) return null;
   psiBusy = true; psiErr = ''; psiRender();
@@ -2113,15 +2119,15 @@ async function psiDraft(auto) {
     if (db.settings.apiKey) {
       try {
         r = await claudeJson({ max: 4000, effort: 'medium', schema: PSI_DRAFT_SCHEMA,
-          system: `Você prepara, para ${db.settings.myName || 'o usuário'} revisar e mandar à psicóloga dele, o resumo da semana de ${brDay(W.de)} a ${brDay(W.ate)}. Escreva em primeira pessoa, como se fosse ele ("nesta semana eu…"), em português do Brasil, simples e honesto. Use SÓ o que está nos dados: o diário, o que ele escreveu para a conselheira, as metas, os temas para a sessão e os números. Não diagnostique, não use rótulos clínicos e não interprete causas: descreva o que aconteceu e o que ele sentiu, com as palavras dele entre aspas quando ajudar. De outras pessoas, só o primeiro nome ou o papel, e só o necessário. Sem conselho. Campo sem dado fica vazio.`,
+          system: `Você prepara, para ${db.settings.myName || 'o usuário'} revisar e mandar à psicóloga dele, o resumo da semana de ${brDay(W.de)} a ${brDay(W.ate)}. Escreva em primeira pessoa, como se fosse ele ("nesta semana eu…"), em português do Brasil, simples e honesto. Use SÓ o que está nos dados: o diário, o que ele escreveu para a conselheira, as metas, os temas para a sessão e os números. Não diagnostique, não use rótulos clínicos e não interprete causas: descreva o que aconteceu e o que ele sentiu, com as palavras dele entre aspas quando ajudar. De outras pessoas, só o primeiro nome ou o papel, e só o necessário. Sem conselho. Campo sem dado fica vazio. O que ele lançou para levar à sessão entra no resumo do jeito que ele escreveu, numa seção própria: não repita esses itens nos seus campos.`,
           user: psiContext() + '\n\n## O que ele escreveu para a conselheira nesta semana\n' + (W.chat.map(m => `- ${m.ts.slice(5, 16).replace('T', ' ')}: ${m.text}`).join('\n') || '(nada)') });
       } catch (e) { psiErr = 'A IA não respondeu (' + e.message + '); montei o básico.'; }
     }
-    if (!r) r = { como_estive: '', temas: [], situacoes: W.diary.filter(d => d.texto).slice(-8).map(d => `${brDay(d.ts.slice(0, 10))}: "${d.texto.slice(0, 300)}"`), metas: psi.goals.filter(g => g.status !== 'feita' || (g.notas || []).some(n => n.ts >= W.de)).map(g => `${g.titulo} (${g.status})`), para_sessao: psi.sessao.filter(x => !x.usado).map(x => x.texto) };
+    if (!r) r = { como_estive: '', temas: [], situacoes: W.diary.filter(d => d.texto).slice(-8).map(d => `${brDay(d.ts.slice(0, 10))}: "${d.texto.slice(0, 300)}"`), metas: psi.goals.filter(g => g.status !== 'feita' || (g.notas || []).some(n => n.ts >= W.de)).map(g => `${g.titulo} (${g.status})`) };
     const L = [`*Resumo da minha semana (${brDay(W.de)} a ${brDay(W.ate)})*`], sec = (t, v) => { const list = Array.isArray(v), a = (list ? v : [v]).map(x => String(x || '').trim()).filter(Boolean); if (a.length) L.push('', `*${t}*`, ...(list ? a.map(x => '• ' + x) : a)); };
     sec('Como estive', r.como_estive);
     const nl = psiNumLine(W); if (nl) L.push('', `*Diário:* ${nl}`);
-    sec('Temas', r.temas); sec('Situações', r.situacoes); sec('Metas', r.metas); sec('Quero levar para a sessão', r.para_sessao);
+    sec('Temas', r.temas); sec('Situações', r.situacoes); sec('Metas', r.metas); sec('Quero levar para a sessão', psi.sessao.filter(x => !x.usado).map(x => x.texto)); // as palavras dele, sem a IA reescrever
     L.push('', `*Rotina:* ${W.evs} compromisso(s) na agenda, ${W.atrasadas} atividade(s) atrasada(s), ${W.late} mensagem(ns) de trabalho entre 22 h e 6 h.`);
     const d = { id: uid(), de: W.de, ate: W.ate, ts: localISO(new Date()), auto: !!auto, text: L.join('\n'), status: 'rascunho' };
     psi.drafts.unshift(d); if (psi.drafts.length > 12) psi.drafts.length = 12; psiSave();
@@ -2139,22 +2145,40 @@ function psiTick() { // monta sozinho no dia e hora escolhidos; só monta, nunca
   psiDraft(true).then(d => { if (!d) return; notify('🌱 Espaço pessoal', 'O resumo da semana está pronto para você revisar (Ctrl+Shift+Y).'); selfSend('🌱 O resumo da semana do seu espaço pessoal está pronto para revisar no app (Ctrl+Shift+Y).', 'aviso'); });
 }
 async function psiHash(pin) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('wv1psi:' + pin)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
-function psiToggle() { if (psiOpen) psiClose(); else { psiOpen = true; psiConfirm = false; $('#psi').hidden = false; psiTouch(); psiRender(); setTimeout(() => { const i = $('#psi [data-focus]'); if (i) i.focus(); }, 50); } }
-function psiClose() { psiOpen = false; psiUnlocked = false; clearTimeout(psiIdleT); const el = $('#psi'); if (el) { el.hidden = true; el.innerHTML = ''; } }
+function psiFocus() { setTimeout(() => { const i = $('#psi [data-focus]'); if (i) i.focus(); }, 50); }
+function psiToggle() { if (psiOpen) psiClose(); else { psiOpen = true; psiConfirm = false; psiTab = 'psicologa'; $('#psi').hidden = false; psiTouch(); psiRender(); psiFocus(); } }
+function psiClose() { psiOpen = false; psiUnlocked = false; psiForgot = false; psiErr = ''; clearTimeout(psiIdleT); const el = $('#psi'); if (el) { el.hidden = true; el.innerHTML = ''; } }
 function psiTouch() { clearTimeout(psiIdleT); psiIdleT = setTimeout(psiClose, 10 * 60e3); } // 10 min parado: fecha (e tranca)
 const psiTime = iso => `${brDay(iso.slice(0, 10))} ${iso.slice(11, 16)}`;
 function psiRender() {
   const el = $('#psi'); if (!el || !psiOpen) return;
-  const c = psi.cfg, keep = el.querySelector('.psi-in'), draft = keep ? keep.value : '';
-  if (c.pin && !psiUnlocked) {
-    el.innerHTML = `<div class="psi-box psi-lock"><div class="psi-h"><b>🌱 Espaço pessoal</b><button data-psi="close" title="Fechar (Esc)">✕</button></div>
-      <div class="psi-pin"><input type="password" inputmode="numeric" maxlength="8" placeholder="PIN" data-focus id="psiPin"><button class="ok" data-psi="unlock">Abrir</button><div class="psi-err">${esc(psiErr)}</div></div></div>`;
+  const c = psi.cfg, keep = el.querySelector('.psi-in'), draft = keep ? keep.value : '', keepS = el.querySelector('#psiSes'), sesDraft = keepS ? keepS.value : '';
+  const lockBox = inner => { el.innerHTML = `<div class="psi-box psi-lock"><div class="psi-h"><b>🌱 Espaço pessoal</b><span class="psi-tabs"></span><button data-psi="close" title="Fechar (Esc)">✕</button></div><div class="psi-pin">${inner}<div class="psi-err">${esc(psiErr)}</div></div></div>`; };
+  if (!c.pin) { // senha obrigatória: na primeira vez, ele cria
+    lockBox(`<div class="psi-mu">Crie a senha deste espaço. Ela vai ser pedida toda vez que ele abrir. Pode usar letras e números. Guarde bem: se esquecer, não tem como recuperar, só apagando o que estiver aqui.</div>
+      <input type="password" maxlength="64" placeholder="Senha (no mínimo 4)" autocomplete="new-password" data-focus id="psiPw1"><input type="password" maxlength="64" placeholder="Repita a senha" autocomplete="new-password" id="psiPw2"><button class="ok" data-psi="pw-create">Criar senha</button>`);
     return;
   }
-  const tabs = [['conversa', '💬 Conversa'], ['diario', '📓 Diário'], ['metas', '🎯 Metas'], ['semana', '📄 Semana']];
-  const risk = psi.chat.slice(-6).some(m => m.from === 'me' && PSI_RISK.test(m.text));
+  if (!psiUnlocked) {
+    if (psiForgot) lockBox(`<div class="psi-mu">Sem a senha, o único jeito é apagar o espaço pessoal deste computador: diário, metas, conversas, anotações para a sessão e rascunhos. O nome da psicóloga e o horário do resumo continuam. Para confirmar, escreva <b>APAGAR</b>.</div>
+      <input id="psiWipe" maxlength="10" placeholder="APAGAR" autocomplete="off" data-focus><span class="psi-gb2"><button class="warn" data-psi="wipe">Apagar tudo e criar outra senha</button><button data-psi="forgot-back">Voltar</button></span>`);
+    else lockBox(`<input type="password" maxlength="64" placeholder="Senha" autocomplete="current-password" data-focus id="psiPin"><button class="ok" data-psi="unlock">Abrir</button><button class="psi-lk" data-psi="forgot">Esqueci a senha</button>`);
+    return;
+  }
+  const tabs = [['psicologa', '🩺 Psicóloga'], ['conversa', '💬 Conversa'], ['diario', '📓 Diário'], ['metas', '🎯 Metas'], ['semana', '📄 Semana']];
+  const risk = psi.chat.slice(-6).some(m => m.from === 'me' && PSI_RISK.test(m.text)) || psi.sessao.slice(-4).some(x => !x.usado && PSI_RISK.test(x.texto));
   let body = '';
-  if (psiTab === 'conversa') {
+  if (psiTab === 'psicologa') {
+    const ses = psi.sessao.filter(x => !x.usado).reverse(), old = psi.sessao.filter(x => x.usado).slice(-8).reverse(), quem = c.nome || 'a sua psicóloga';
+    body = `<div class="psi-scroll"><div class="psi-form"><b class="psi-ft">Para levar ${c.nome ? 'à ' + esc(quem) : 'à sua psicóloga'}</b>
+      <textarea id="psiSes" rows="3" placeholder="O que aconteceu, o que você sentiu, o que quer conversar na sessão" data-focus>${esc(sesDraft)}</textarea>
+      <button class="ok" data-psi="ses-add">Lançar</button>
+      <div class="psi-hint">Enter lança, Shift+Enter pula linha. Tudo o que estiver aqui entra no resumo da semana (${PSI_DIAS[+c.dia || 0]} às ${esc(c.hora || '18:00')}), com as suas palavras. Pelo celular: mande para a sua conversa com você mesmo começando com <b>psi sessão</b>, por texto ou áudio.</div></div>`
+      + (ses.length ? ses.map(x => `<div class="psi-d"><div class="psi-dh">${psiTime(x.ts)}${x.via ? ' · ' + x.via : ''}<span class="psi-gb"><button data-psi="ses-ok" data-id="${esc(x.id || x.ts)}" title="Já falei disso na sessão">✓ Já falei</button><button data-psi="ses-rm" data-id="${esc(x.id || x.ts)}" title="Apagar">✕</button></span></div><div>${esc(x.texto)}</div></div>`).join('')
+        : '<div class="psi-empty">Nada lançado ainda. Escreva acima o que você quer levar para a sessão: um fato, um sentimento, uma dúvida.</div>')
+      + (old.length ? `<div class="psi-d psi-old"><div class="psi-dh"><b>Já levados</b></div>${old.map(x => `<div>• ${esc(x.texto.length > 160 ? x.texto.slice(0, 160) + '…' : x.texto)} <span class="psi-mu">(${x.usadoComo === 'sessao' ? 'falei na sessão' : 'foi no resumo'}${x.usadoEm ? ' ' + brDay(x.usadoEm.slice(0, 10)) : ''})</span></div>`).join('')}</div>` : '')
+      + (risk ? `<div class="psi-risk psi-risk-in">🆘 ${esc(PSI_HELP)}</div>` : '') + '</div>';
+  } else if (psiTab === 'conversa') {
     body = `<div class="psi-msgs" id="psiMsgs">${psi.chat.length ? '' : `<div class="psi-empty">Este espaço é só seu, para pensar com calma. Pode começar pelo que está pesando hoje, por uma meta ou por uma decisão. Eu ajudo a organizar e a dar o próximo passo. O que for mais fundo, a gente anota para a sessão com a sua psicóloga.</div>`}`
       + psi.chat.slice(-80).map(m => `<div class="psi-m ${m.from === 'me' ? 'me' : ''}"><div>${esc(m.text)}</div><i>${psiTime(m.ts)}</i></div>`).join('')
       + (psiBusy ? '<div class="psi-m"><div class="think">pensando…</div></div>' : '') + '</div>'
@@ -2177,13 +2201,13 @@ function psiRender() {
     body = `<div class="psi-scroll"><div class="psi-form psi-cfg"><label>Psicóloga no WhatsApp <input id="psiNome" value="${esc(c.nome)}" placeholder="nome exatamente como na lista"></label>
       <label>Montar o rascunho <select id="psiDia">${PSI_DIAS.map((x, i) => `<option value="${i}" ${+c.dia === i ? 'selected' : ''}>${x}</option>`).join('')}</select> às <input id="psiHora" type="time" value="${esc(c.hora)}"></label>
       <label class="psi-ck"><input type="checkbox" id="psiAuto" ${c.auto !== false ? 'checked' : ''}> montar sozinho e me avisar (nunca envia sem você)</label>
-      <label>PIN <input id="psiNewPin" type="password" inputmode="numeric" maxlength="8" placeholder="${c.pin ? 'novo PIN (vazio = mantém)' : 'opcional, 4 a 8 números'}"></label><span class="psi-gb2"><button class="ok" data-psi="cfg-save">Salvar</button>${c.pin ? '<button data-psi="pin-off">Tirar o PIN</button>' : ''}</span></div>`
-      + (ses.length ? `<div class="psi-d"><div class="psi-dh"><b>Para levar à sessão</b></div>${ses.map(x => `<div>• ${esc(x.texto)} <button class="psi-x" data-psi="ses-del" data-id="${esc(x.ts)}">✕</button></div>`).join('')}</div>` : '')
+      <label>Trocar a senha <input id="psiNewPin" type="password" maxlength="64" placeholder="nova senha (vazio = mantém)" autocomplete="new-password"><input id="psiNewPin2" type="password" maxlength="64" placeholder="repita a nova senha" autocomplete="new-password"></label><span class="psi-gb2"><button class="ok" data-psi="cfg-save">Salvar</button></span></div>`
+      + (ses.length ? `<div class="psi-mu psi-sesn">${ses.length === 1 ? '1 anotação' : ses.length + ' anotações'} da aba 🩺 Psicóloga ${ses.length === 1 ? 'entra' : 'entram'} no rascunho, do jeito que você escreveu.</div>` : '')
       + `<div class="psi-d"><div class="psi-dh"><b>Rascunho para a psicóloga</b>${d ? ` · ${brDay(d.de)} a ${brDay(d.ate)} · ${d.status === 'enviado' ? '✓ enviado ' + psiTime(d.sentAt) : 'rascunho'}` : ''}<span class="psi-gb"><button data-psi="draft">${psiBusy ? 'montando…' : d ? 'Montar de novo' : 'Montar agora'}</button></span></div>`
       + (d ? `<textarea id="psiDraft" rows="16">${esc(d.text)}</textarea><div class="psi-gb2"><button data-psi="copy">Copiar</button>${c.nome ? `<button class="${psiConfirm ? 'warn' : 'ok'}" data-psi="send-draft">${psiConfirm ? 'Confirmar: enviar para ' + esc(c.nome) + ' agora' : 'Enviar para ' + esc(c.nome) + ' no WhatsApp'}</button>${psiConfirm ? '<button data-psi="send-cancel">Cancelar</button>' : ''}` : '<span class="psi-mu">Escreva o nome da psicóloga acima para enviar pelo WhatsApp.</span>'}</div>` : '<div class="psi-mu">Ainda não há rascunho. Ele junta o diário, as conversas daqui, as metas e os números da semana.</div>')
       + `${psiErr ? `<div class="psi-err">${esc(psiErr)}</div>` : ''}<div class="psi-hint">Revise e edite antes de enviar: o texto vai como está. Ele sai das suas palavras e dos números da semana; o que outras pessoas escreveram no WhatsApp fica de fora, e nada aqui é diagnóstico.</div></div></div>`;
   }
-  el.innerHTML = `<div class="psi-box"><div class="psi-h"><b>🌱 Espaço pessoal</b><span class="psi-tabs">${tabs.map(([k, l]) => `<button class="${psiTab === k ? 'on' : ''}" data-psi="tab" data-id="${k}">${l}</button>`).join('')}</span>${c.pin ? '<button data-psi="close" title="Trancar">🔒</button>' : ''}<button data-psi="close" title="Fechar (Esc)">✕</button></div>
+  el.innerHTML = `<div class="psi-box"><div class="psi-h"><b>🌱 Espaço pessoal</b><span class="psi-tabs">${tabs.map(([k, l]) => `<button class="${psiTab === k ? 'on' : ''}" data-psi="tab" data-id="${k}">${l}</button>`).join('')}</span><button data-psi="close" title="Trancar">🔒</button><button data-psi="close" title="Fechar (Esc)">✕</button></div>
     <div class="psi-note">Apoio para pensar e se organizar entre as sessões. Não é terapia e não substitui a sua psicóloga. Em crise: CVV 188 (24 h, gratuito) · SAMU 192. Fica só neste computador; o texto passa pela sua chave do Claude para ela responder.</div>${body}</div>`;
   const ms = $('#psiMsgs'); if (ms) ms.scrollTop = ms.scrollHeight;
 }
@@ -2192,7 +2216,10 @@ document.addEventListener('keydown', e => {
   if (!psiOpen) return; psiTouch();
   if (e.key === 'Escape') { psiClose(); return; }
   if (e.key === 'Enter' && !e.shiftKey && e.target.classList && e.target.classList.contains('psi-in')) { e.preventDefault(); psiAct('send'); }
+  if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'psiSes' && !e.isComposing) { e.preventDefault(); psiAct('ses-add'); }
   if (e.key === 'Enter' && e.target.id === 'psiPin') psiAct('unlock');
+  if (e.key === 'Enter' && (e.target.id === 'psiPw1' || e.target.id === 'psiPw2')) { if (e.target.id === 'psiPw1') $('#psiPw2').focus(); else psiAct('pw-create'); }
+  if (e.key === 'Enter' && e.target.id === 'psiWipe') psiAct('wipe');
 }, true);
 document.addEventListener('input', e => {
   if (!psiOpen) return;
@@ -2203,7 +2230,35 @@ async function psiAct(a, id, v) {
   psiTouch(); const c = psi.cfg;
   if (a === 'close') return psiClose();
   if (a === 'tab') { psiTab = id; psiConfirm = false; psiErr = ''; return psiRender(); }
-  if (a === 'unlock') { const pin = ($('#psiPin') || {}).value || ''; if ((await psiHash(pin)) === c.pin) { psiUnlocked = true; psiErr = ''; } else psiErr = 'PIN errado'; return psiRender(); }
+  if (a === 'unlock') {
+    if (Date.now() < psiWait) { psiErr = `Muitas tentativas. Espere ${Math.ceil((psiWait - Date.now()) / 1000)} s.`; psiRender(); return psiFocus(); }
+    const pin = ($('#psiPin') || {}).value || '';
+    if ((await psiHash(pin)) === c.pin) { psiUnlocked = true; psiErr = ''; psiFails = 0; psiTab = 'psicologa'; }
+    else if (++psiFails >= 5) { psiFails = 0; psiWait = Date.now() + 60e3; psiErr = 'Senha errada. Espere 1 minuto para tentar de novo.'; }
+    else psiErr = 'Senha errada';
+    psiRender(); return psiFocus();
+  }
+  if (a === 'pw-create') {
+    const p1 = ($('#psiPw1') || {}).value || '', p2 = ($('#psiPw2') || {}).value || '';
+    if (p1.trim().length < 4) psiErr = 'A senha precisa ter pelo menos 4 caracteres';
+    else if (p1 !== p2) psiErr = 'As duas senhas não estão iguais';
+    else { c.pin = await psiHash(p1); psiUnlocked = true; psiErr = ''; psiTab = 'psicologa'; psiSave(); toast('🔒 Senha criada'); }
+    psiRender(); return psiFocus();
+  }
+  if (a === 'forgot') { psiForgot = true; psiErr = ''; psiRender(); return psiFocus(); }
+  if (a === 'forgot-back') { psiForgot = false; psiErr = ''; psiRender(); return psiFocus(); }
+  if (a === 'wipe') {
+    if ((($('#psiWipe') || {}).value || '').trim().toUpperCase() !== 'APAGAR') { psiErr = 'Escreva APAGAR para confirmar'; psiRender(); return psiFocus(); }
+    psi = { chat: [], diary: [], goals: [], sessao: [], drafts: [], lastAuto: psi.lastAuto, cfg: Object.assign({}, c, { pin: '' }) };
+    psiSave(); psiForgot = false; psiErr = ''; toast('Espaço pessoal apagado'); psiRender(); return psiFocus();
+  }
+  if (!psiUnlocked) return; // daqui para baixo, só com a senha
+  if (a === 'ses-add') {
+    const el = $('#psiSes'), t = ((el || {}).value || '').trim(); if (!t) return toast('Escreva o que você quer levar');
+    psi.sessao.push({ id: uid(), ts: localISO(new Date()), texto: t.slice(0, 2000) }); psiSave(); el.value = ''; toast('🌱 Lançado'); psiRender(); return psiFocus();
+  }
+  if (a === 'ses-ok') { const x = psi.sessao.find(s => (s.id || s.ts) === id); if (x) { x.usado = true; x.usadoComo = 'sessao'; x.usadoEm = localISO(new Date()); psiSave(); } return psiRender(); }
+  if (a === 'ses-rm') { psi.sessao = psi.sessao.filter(s => (s.id || s.ts) !== id); psiSave(); return psiRender(); }
   if (a === 'send') { const t = ($('#psi .psi-in') || {}).value || ''; if (!t.trim() || psiBusy) return; $('#psi .psi-in').value = ''; psi.chat.push({ from: 'me', ts: localISO(new Date()), text: t.trim().slice(0, 4000) }); psiSave(); return psiAsk(); }
   if (a === 'diary-add') {
     const e = { id: uid(), ts: localISO(new Date()), texto: ($('#psiTxt').value || '').trim().slice(0, 2000) };
@@ -2216,14 +2271,13 @@ async function psiAct(a, id, v) {
   if (a === 'goal-add') { const t = $('#psiGoal').value.trim(); if (!t) return; psiTool('criar_meta', { titulo: t, porque: $('#psiWhy').value.trim() }); psiSave(); return psiRender(); }
   if (a === 'goal-st') { const g = psi.goals.find(x => x.id === id); if (g) { g.status = v; g.notas.push({ ts: localISO(new Date()), texto: 'status: ' + v }); psiSave(); } return psiRender(); }
   if (a === 'goal-del') { psi.goals = psi.goals.filter(g => g.id !== id); psiSave(); return psiRender(); }
-  if (a === 'ses-del') { const x = psi.sessao.find(s => s.ts === id); if (x) x.usado = true; psiSave(); return psiRender(); }
-  if (a === 'pin-off') { c.pin = ''; psiSave(); toast('PIN removido'); return psiRender(); }
   if (a === 'cfg-save') {
+    const np = $('#psiNewPin').value, np2 = $('#psiNewPin2').value;
+    if (np && np.trim().length < 4) { psiErr = 'A senha precisa ter pelo menos 4 caracteres'; return psiRender(); }
+    if (np && np !== np2) { psiErr = 'As duas senhas novas não estão iguais'; return psiRender(); }
     c.nome = $('#psiNome').value.trim(); c.dia = +$('#psiDia').value; c.hora = $('#psiHora').value || '18:00'; c.auto = $('#psiAuto').checked;
-    const np = $('#psiNewPin').value.trim();
-    if (np && !/^\d{4,8}$/.test(np)) { psiErr = 'O PIN precisa ter de 4 a 8 números'; return psiRender(); }
-    if (np) { c.pin = await psiHash(np); psiUnlocked = true; }
-    psiErr = ''; psiSave(); toast('🌱 Salvo'); return psiRender();
+    if (np) c.pin = await psiHash(np);
+    psiErr = ''; psiSave(); psiPurge(); toast(np ? '🔒 Salvo, com a senha nova' : '🌱 Salvo'); return psiRender();
   }
   if (a === 'draft') { await psiDraft(false); return; }
   if (a === 'copy') { try { await navigator.clipboard.writeText($('#psiDraft').value); toast('Copiado'); } catch { toast('Não consegui copiar'); } return; }
@@ -2233,7 +2287,7 @@ async function psiAct(a, id, v) {
     if (!psiConfirm) { psiConfirm = true; return psiRender(); } // dois toques: nada sai por engano
     psiConfirm = false; d.text = $('#psiDraft').value; psiErr = 'Enviando…'; psiRender();
     const r = await waSend(c.nome, d.text.trim());
-    if (r.ok) { d.status = 'enviado'; d.sentAt = localISO(new Date()); psi.sessao.forEach(x => { x.usado = true; }); psiErr = ''; toast('🌱 Enviado para ' + c.nome); }
+    if (r.ok) { d.status = 'enviado'; d.sentAt = localISO(new Date()); psi.sessao.forEach(x => { if (!x.usado) { x.usado = true; x.usadoComo = 'resumo'; x.usadoEm = d.sentAt; } }); psiErr = ''; toast('🌱 Enviado para ' + c.nome); }
     else psiErr = 'Não enviei: ' + (r.erro || 'falhou');
     psiSave(); return psiRender();
   }
