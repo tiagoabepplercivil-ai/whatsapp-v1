@@ -108,7 +108,7 @@ async function scanMedia() {
 let lastInput = 0;
 ['mousedown', 'keydown', 'wheel', 'touchstart', 'pointerdown'].forEach(ev => document.addEventListener(ev, e => { if (e.isTrusted) lastInput = Date.now(); }, true)); // só evento real do usuário (os cliques da varredura são sintéticos)
 const idle = () => Date.now() - lastInput > 90e3;
-document.addEventListener('keydown', e => { if (e.isTrusted && e.ctrlKey && e.shiftKey && e.code === 'KeyY') { e.preventDefault(); e.stopPropagation(); try { ipcRenderer.sendToHost('wa-hotkey', 'psi'); } catch {} } }, true); // atalho do app funciona com o WhatsApp em foco
+document.addEventListener('keydown', e => { if (e.isTrusted && e.ctrlKey && e.shiftKey && (e.code === 'KeyT' || e.code === 'KeyY')) { e.preventDefault(); e.stopPropagation(); try { ipcRenderer.sendToHost('wa-hotkey', 'psi'); } catch {} } }, true); // atalho do app funciona com o WhatsApp em foco
 let sweeping = false, cancel = false;
 const report = o => { try { ipcRenderer.sendToHost('wa-sweep', o); } catch {} };
 

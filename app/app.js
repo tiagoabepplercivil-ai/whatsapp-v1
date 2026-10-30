@@ -2004,7 +2004,7 @@ async function selfPump() {
 }
 function feedPlain(f) { const sub = feedSub(f); return [f.head ? '*' + f.head + '*' : '', (f.icon ? f.icon + ' ' : '') + waFmt(f.text || ''), sub && f.kind !== 'plan' ? sub : ''].filter(Boolean).join('\n'); }
 
-// ---------- 🌱 Espaço pessoal (escondido: Ctrl+Shift+Y): conselheira de desenvolvimento pessoal, diário, metas e o resumo da semana para a psicóloga ----------
+// ---------- 🌱 Espaço pessoal (escondido: Ctrl+Shift+T; Ctrl+Shift+Y também abre): conselheira de desenvolvimento pessoal, diário, metas e o resumo da semana para a psicóloga ----------
 // Fica só neste PC, numa gaveta separada do resto (fora do db): não entra na assistente, no Cérebro, no Drive nem no backup.
 // Não é terapia. O resumo só vai para a psicóloga quando ele revisa e confirma o envio.
 var PSI_KEY = 'wv1-psi', psiOpen = false, psiUnlocked = false, psiTab = 'psicologa', psiBusy = false, psiIdleT = null, psiConfirm = false, psiErr = '', psiFails = 0, psiWait = 0, psiForgot = false;
@@ -2142,7 +2142,7 @@ function psiTick() { // monta sozinho no dia e hora escolhidos; só monta, nunca
   if (!psi.lastAuto) { psi.lastAuto = key; psiSave(); return; } // primeira vez: começa a contar daqui
   if (psi.lastAuto === key || psiBusy || now - at > 2 * 864e5) return;
   psi.lastAuto = key; psiSave();
-  psiDraft(true).then(d => { if (!d) return; notify('🌱 Espaço pessoal', 'O resumo da semana está pronto para você revisar (Ctrl+Shift+Y).'); selfSend('🌱 O resumo da semana do seu espaço pessoal está pronto para revisar no app (Ctrl+Shift+Y).', 'aviso'); });
+  psiDraft(true).then(d => { if (!d) return; notify('🌱 Espaço pessoal', 'O resumo da semana está pronto para você revisar (Ctrl+Shift+T).'); selfSend('🌱 O resumo da semana do seu espaço pessoal está pronto para revisar no app (Ctrl+Shift+T).', 'aviso'); });
 }
 async function psiHash(pin) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('wv1psi:' + pin)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join(''); }
 function psiFocus() { setTimeout(() => { const i = $('#psi [data-focus]'); if (i) i.focus(); }, 50); }
@@ -2212,7 +2212,7 @@ function psiRender() {
   const ms = $('#psiMsgs'); if (ms) ms.scrollTop = ms.scrollHeight;
 }
 document.addEventListener('keydown', e => {
-  if (e.ctrlKey && e.shiftKey && e.code === 'KeyY') { e.preventDefault(); psiToggle(); return; }
+  if (e.ctrlKey && e.shiftKey && (e.code === 'KeyT' || e.code === 'KeyY')) { e.preventDefault(); psiToggle(); return; }
   if (!psiOpen) return; psiTouch();
   if (e.key === 'Escape') { psiClose(); return; }
   if (e.key === 'Enter' && !e.shiftKey && e.target.classList && e.target.classList.contains('psi-in')) { e.preventDefault(); psiAct('send'); }
