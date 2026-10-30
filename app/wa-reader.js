@@ -8,6 +8,17 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const UNREAD_SEL = '[aria-label*="não lida"], [aria-label*="Não lida"], [aria-label*="unread"]';
+// texto de um balão com os emojis (o WhatsApp desenha emoji como <img alt="🤖">, que o innerText perde)
+function txtOf(el) {
+  if (!el) return '';
+  if (!el.querySelector('img[alt]')) return el.innerText || '';
+  let s = '';
+  for (const n of el.childNodes) s += n.nodeType === 3 ? n.nodeValue : n.nodeType !== 1 ? '' : n.tagName === 'IMG' ? (n.getAttribute('alt') || '') : n.tagName === 'BR' ? '\n' : txtOf(n);
+  return s;
+}
+// sua conversa com você mesmo ("Tiago (você)"): o app liga com a Conversa da assistente
+const SELF_RE = /\((voc[eê]|you)\)\s*$/i;
+let selfCfg = { on: false, name: '' }, selfPrev = null, selfDirty = false, selfSeen = '', selfFailAt = 0, selfSending = false;
 
 function chatName() {
   const h = $('#main header');
@@ -26,7 +37,7 @@ function scanOpenChat() {
     const cp = row.querySelector('.copyable-text[data-pre-plain-text]');
     if (!cp) return;
     const el = cp.querySelector('.selectable-text') || cp;
-    const text = (el.innerText || '').trim();
+    const text = txtOf(el).trim();
     if (!text) return;
     sent.add(id);
     msgs.push({ id, meta: cp.getAttribute('data-pre-plain-text') || '', text, out: id.startsWith('true_') });
@@ -45,6 +56,7 @@ function listRows() {
     const titles = $$('span[title]', row).map(s => s.getAttribute('title')).filter(Boolean);
     if (!titles.length || seen.has(titles[0])) continue;
     seen.add(titles[0]);
+    if (SELF_RE.test(titles[0]) && titles[0] !== selfSeen) { selfSeen = titles[0]; try { ipcRenderer.sendToHost('wa-self-found', { name: titles[0] }); } catch {} }
     const badge = row.querySelector(UNREAD_SEL);
     const unread = badge ? (parseInt(badge.getAttribute('aria-label') || '', 10) || 1) : 0;
     out.push({ row, name: titles[0], preview: titles.length > 1 ? titles[titles.length - 1] : '', unread });
@@ -169,6 +181,7 @@ ipcRenderer.on('wa-sweep', (_, o) => { o = o || {}; if (o.cancel) { cancel = tru
 
 // ---------- envio: abre a conversa, digita e envia (só roda quando o usuário aprovou um plano no app) ----------
 const normTxt = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const keyTxt = s => normTxt(s).replace(/[^a-z0-9]+/g, ''); // compara só letras e números: emoji, espaço e quebra de linha o WhatsApp desenha do jeito dele
 async function findAndOpen(name) {
   const want = normTxt(name);
   if (!want) return false;
@@ -187,11 +200,11 @@ async function typeInto(box, text) {
   document.execCommand('selectAll', false, null); document.execCommand('delete', false, null);
   document.execCommand('insertText', false, text);
   await sleep(250);
-  if (normTxt(box.innerText) === normTxt(text)) return true;
+  if (keyTxt(txtOf(box)) === keyTxt(text)) return true;
   box.focus(); const dt = new DataTransfer(); dt.setData('text/plain', text); // o editor não aceitou: tenta como colagem
   box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   await sleep(400);
-  return normTxt(box.innerText) === normTxt(text);
+  return keyTxt(txtOf(box)) === keyTxt(text);
 }
 async function sendTo(chat, text) {
   if (sweeping) { cancel = true; for (let i = 0; i < 40 && sweeping; i++) await sleep(250); }
@@ -205,9 +218,9 @@ async function sendTo(chat, text) {
   for (let i = 0; i < 40; i++) { // confirma: a mensagem aparece como enviada e a caixa esvaziou
     await sleep(250);
     const rows = $$('#main div[data-id^="true_"]'), last = rows[rows.length - 1];
-    const t = last ? ((last.querySelector('.selectable-text') || last).innerText || '') : '';
+    const t = last ? txtOf(last.querySelector('.selectable-text') || last) : '';
     const b = composer();
-    if (normTxt(t) === normTxt(text) && !(b && normTxt(b.innerText))) return { ok: true, conversa: chatName() };
+    if (keyTxt(t) === keyTxt(text) && !(b && keyTxt(txtOf(b)))) return { ok: true, conversa: chatName() };
   }
   return { ok: false, erro: 'não confirmei o envio; confira na conversa ' + chatName() };
 }
@@ -217,6 +230,57 @@ ipcRenderer.on('wa-open', async (_, o) => { // o Cérebro pediu para abrir a con
   ipcRenderer.sendToHost('wa-opened', { chat: o.chat, ok: !!ok });
 });
 ipcRenderer.on('wa-send', async (_, o) => { o = o || {}; let r; try { r = await sendTo(o.chat, o.text); } catch (e) { r = { ok: false, erro: e.message }; } ipcRenderer.sendToHost('wa-sent', { id: o.id, ...r }); });
+
+// ---------- sua conversa com você mesmo ligada ao app ----------
+// Mensagem que você manda para si mesmo não fica "não lida": o leitor percebe pela prévia da lista que mudou,
+// abre a conversa quando você não está mexendo no WhatsApp (30 s), lê e volta para a conversa onde você estava.
+const isSelfName = n => !!n && (SELF_RE.test(n) || (!!selfCfg.name && normTxt(n) === normTxt(selfCfg.name)));
+const selfTarget = () => selfCfg.name || selfSeen || '(você)';
+const quiet = ms => Date.now() - lastInput > ms;
+ipcRenderer.on('wa-self-cfg', (_, o) => {
+  const was = selfCfg.on; selfCfg = { on: !!(o && o.on), name: String((o && o.name) || '') };
+  if (selfCfg.on && !was) { selfDirty = true; selfFailAt = 0; } // ao ligar (e ao abrir o app) lê uma vez: pega o que você mandou com o app fechado
+});
+function selfWatch() {
+  if (!selfCfg.on) return;
+  const open = isSelfName(chatName());
+  if (open) selfDirty = false; // aberta na sua frente: a leitura normal (a cada 5 s) já pega
+  const r = listRows().find(x => isSelfName(x.name)); if (!r) return;
+  if (selfPrev !== null && r.preview !== selfPrev && !open && !/^\s*🤖/u.test(r.preview)) selfDirty = true;
+  selfPrev = r.preview;
+}
+async function selfRead() {
+  selfDirty = false; sweeping = true;
+  const pane = $('#pane-side'), top = pane ? pane.scrollTop : 0, orig = chatName();
+  try {
+    if (await findAndOpen(selfTarget())) {
+      await sleep(900);
+      const a = scanOpenChat(); if (a) ipcRenderer.sendToHost('wa-msgs', [a]);
+      const au = scanAudios(true); if (au) ipcRenderer.sendToHost('wa-audio-seen', au);
+      const r = listRows().find(x => isSelfName(x.name)); if (r) selfPrev = r.preview;
+    } else selfFailAt = Date.now();
+    if (orig && normTxt(chatName()) !== normTxt(orig)) await findAndOpen(orig);
+    if (pane) pane.scrollTop = top;
+  } catch {}
+  sweeping = false;
+}
+ipcRenderer.on('wa-self-send', async (_, o) => { // o app manda para a sua conversa (sempre começa com 🤖): espera você largar o WhatsApp e volta onde estava
+  o = o || {};
+  for (let i = 0; i < 240 && (sweeping || selfSending || !quiet(30e3) || !$('#pane-side')); i++) await sleep(5000);
+  selfSending = true;
+  const pane = $('#pane-side'), top = pane ? pane.scrollTop : 0, orig = chatName();
+  let r; try { r = await sendTo(selfTarget(), o.text); } catch (e) { r = { ok: false, erro: e.message }; }
+  try { // já está na conversa: pega o que você mandou do celular nesse meio tempo (a prévia da lista agora mostra a resposta do app)
+    if (isSelfName(chatName())) {
+      const a = scanOpenChat(); if (a) ipcRenderer.sendToHost('wa-msgs', [a]);
+      const au = scanAudios(!isSelfName(orig)); if (au) ipcRenderer.sendToHost('wa-audio-seen', au); // vou sair daqui: o áudio vai para a fila
+      const row = listRows().find(x => isSelfName(x.name)); if (row) selfPrev = row.preview; // mesmo instante da leitura: o que chegar depois muda a prévia e é lido
+    }
+  } catch {}
+  try { if (orig && !isSelfName(orig) && normTxt(chatName()) !== normTxt(orig)) await findAndOpen(orig); if (pane) pane.scrollTop = top; } catch {}
+  selfSending = false;
+  ipcRenderer.sendToHost('wa-sent', { id: o.id, ...r });
+});
 
 // ---------- áudios ----------
 // O WhatsApp toca o áudio no mundo da página. O captador abaixo roda lá (webFrame.executeJavaScript, que passa pela CSP):
@@ -435,5 +499,7 @@ setInterval(() => {
     if (batches.length) ipcRenderer.sendToHost('wa-msgs', batches);
     const au = scanAudios(); if (au) ipcRenderer.sendToHost('wa-audio-seen', au);
     paintAll();
+    selfWatch();
+    if (selfCfg.on && selfDirty && !selfSending && quiet(30e3) && Date.now() - selfFailAt > 10 * 60e3 && $('#pane-side [role="listitem"], #pane-side [role="row"]')) selfRead();
   } catch (e) { /* o WhatsApp mudou o site: ignora e tenta de novo */ }
 }, 5000);

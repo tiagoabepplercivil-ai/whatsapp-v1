@@ -1,7 +1,7 @@
 {
-  "ui": "1.9.0",
+  "ui": "1.9.1",
   "desktop": "1.9.0",
-  "notes": "🧠 Cérebro no meio do painel: vai narrando o que chega no WhatsApp (\"Kaleu mandou… tem isso para agendar\"), com Agendar / Responder / Abrir, e um \"Agora\" com as prioridades e o porquê. Painel mais largo (arraste a borda). Voz e reserva pela OpenAI (opcional). Leitura automática corrigida para o Claude 5.5.",
+  "notes": "📲 Sua conversa com você mesmo (\"Tiago (você)\") ligada à assistente: o que você manda lá (texto ou áudio) vira lembrete, compromisso, atividade ou nota, e ela responde lá. Briefing, lembretes e resumo da semana chegam lá também. Mensagem para outra pessoa continua só com o seu ok.",
   "installer": "https://github.com/tiagoabepplercivil-ai/whatsapp-v1#instalador",
   "files": [
     "index.html",

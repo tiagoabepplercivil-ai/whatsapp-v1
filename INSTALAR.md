@@ -40,6 +40,16 @@ O painel tem três partes: **Agenda e atividades** em cima, o **🧠 Cérebro** 
 - **Nada é enviado sem o seu ok** e nada sai da lista de atividades sem o seu Sim.
 - **Custo:** cada vez que o Cérebro pensa é uma chamada à IA com o que chegou nas últimas 12 h. Para desligar o pensamento automático: ⚙️ Configurações → 🧠 Cérebro.
 
+## 📲 Sua conversa com você mesmo ("Tiago (você)") ligada à assistente (computador)
+A conversa do WhatsApp com o seu próprio número vira uma linha direta com a assistente. O app acha a conversa sozinho (é a que termina com "(você)"); se não achar, escreva o nome em ⚙️ Configurações → 📲.
+- **Do celular para o app:** o que você manda para você mesmo, por texto ou por áudio, chega na aba 💬 Conversa como pedido seu (com 📲 na frente). Exemplos: "me lembra amanhã às 9h de ligar pro Kaleu", "anota o endereço da obra", "qual o número do contrato da Araquari?". A assistente cria o lembrete, o compromisso, a atividade ou a nota e **responde lá**, com 🤖 na frente. O Cérebro também mostra a linha "Do seu WhatsApp: …".
+- **Áudio** que você manda para você mesmo vira texto sozinho (é a sua conversa, ninguém recebe "ouvido"). Precisa da chave de 🎤 Áudios.
+- **Do app para lá:** o briefing da manhã e da noite, os lembretes na hora, o aviso de compromisso 1 h antes e o resumo da semana. Os avisos urgentes do Cérebro são opcionais. Em qualquer linha do Cérebro há **📲**, que manda aquela linha para lá, e o **📲** ao lado das abas abre a conversa.
+- **Mensagem para outra pessoa continua precisando do seu ok.** Se a assistente montar um plano a partir do que você pediu lá, ela manda o plano para a sua conversa, e você pode responder **ok** ali mesmo (só vale o ok dado depois de o plano aparecer lá). Também dá para aprovar no app.
+- **Quando ele mexe no WhatsApp:** para ler ou mandar, o app abre a sua conversa por 2 ou 3 segundos e volta para a conversa em que você estava, e só faz isso com o WhatsApp parado há 30 s. O que já estava na conversa antes de ligar é histórico, não pedido.
+- **O celular não toca** para mensagem que você manda para você mesmo. As respostas ficam lá na conversa para você ver.
+- Para desligar: ⚙️ Configurações → 📲 Sua conversa com você mesmo.
+
 ## 🤖 OpenAI (opcional)
 O Claude continua sendo o cérebro principal. A chave da OpenAI (platform.openai.com → API keys → ⚙️ Configurações → 🤖 OpenAI) acrescenta três coisas:
 1. **Voz natural** quando o Cérebro fala (modelo gpt-4o-mini-tts, voz gerada por IA). Sem a chave, ele usa a voz do Windows.

@@ -319,6 +319,11 @@ input,textarea,select{font:inherit;color:var(--text)}
 @keyframes thk{50%{opacity:.35}}
 .side.vchat .brain{display:none}
 .side:not(.vchat) #sideMsgs{display:none}
+.selfbar{display:flex;align-items:center;gap:8px;padding:6px 12px;font-size:12.5px;line-height:17px;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--line);flex:none}
+.selfbar span{flex:1;min-width:0}.selfbar b{color:var(--text);font-weight:600}
+.selfbar button{font-size:12.5px;font-weight:600;color:var(--teal);background:var(--panel);border-radius:14px;padding:3px 10px;flex:none}
+.selfbar:empty,.side:not(.vchat) .selfbar{display:none}
+.sidetabs .vt+.vt{margin-left:0}
 .brain{flex:1;min-height:0;overflow-y:auto;background-color:var(--chatbg);padding:8px 0 10px}
 .bnow{margin:2px 10px 10px;background:var(--card);border-radius:10px;box-shadow:0 1px .5px rgba(11,20,26,.13);padding:10px 12px;border-top:3px solid #7c3aed}
 .bnow .bh{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
@@ -421,6 +426,7 @@ input,textarea,select{font:inherit;color:var(--text)}
   <div class="ptasks" id="ptasks"></div>
   <div class="sidetabs" id="sideTabs"></div>
   <div class="brain" id="brain"></div>
+  <div class="selfbar" id="selfBar"></div>
   <div class="msgs" id="sideMsgs"></div>
   <div class="compose"><div class="box"><textarea id="sideInput" rows="1" placeholder="Escreva para a assistente"></textarea></div><button class="send" id="sideSend"><svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button></div>
 </aside>

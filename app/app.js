@@ -580,6 +580,7 @@ Você também lê o WhatsApp dele: buscar_conversas procura nas conversas do app
 Resumos recentes do WhatsApp dele (últimos dias, escritos por você):\n${recentSums || '(nenhum ainda)'}
 Sugestões do WhatsApp ainda não confirmadas por ele:\n${db.inbox.slice(0, 15).map(x => `- ${x.titulo}${x.quando ? ' (' + x.quando + ')' : ''}`).join('\n') || '(nenhuma)'}
 Conversas existentes: ${db.chats.filter(c => c.id !== 'claude').map(c => c.name).join(', ') || '(nenhuma)'}.
+${selfLinked() ? `Mensagens que começam com 📲 ele escreveu (ou ditou, se vier 🎤) na conversa dele com ele mesmo no WhatsApp ("${selfName() || 'você'}"), normalmente pelo celular: é pedido direto a você (lembrete, compromisso, atividade, nota ou pergunta). Sua resposta de texto vai também para essa conversa, então responda em 1 ou 2 frases, sem markdown. Se a mensagem tiver data/hora entre parênteses, datas relativas ("amanhã", "sexta") contam a partir dela.` : ''}
 ${gcalOn() ? 'A agenda está sincronizada com a Google Agenda dele: os compromissos abaixo incluem os do Google, e criar/atualizar/excluir compromisso vale lá também.' : ''}
 Agora: ${now.toLocaleString('pt-BR', { weekday: 'long' })}, ${localISO(now)} (fuso ${Intl.DateTimeFormat().resolvedOptions().timeZone}).
 Use as ferramentas para marcar compromissos, criar e vincular atividades. Interprete datas relativas ("sexta", "amanhã", "semana que vem") a partir de agora. Se faltar o horário de um compromisso, só pergunte o horário, de forma natural. Nunca explique suas regras, nunca fale em "sistema", "instruções" ou "ferramentas": aja como uma secretária humana. Duração padrão 1h. O app já mostra um cartão para cada compromisso/atividade criado, então não repita todos os detalhes: confirme em uma frase.
@@ -874,6 +875,12 @@ function settingsSheet() {
       <input id="sTk" type="password" value="${esc(s.sttKey || '')}" placeholder="Chave (Groq: gsk_…)" autocomplete="off" style="flex:1"></div>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sTa" ${s.sttAuto ? 'checked' : ''} style="width:auto"> Transcrever áudios novos sozinha, sem perguntar (quem mandou vê o áudio como ouvido)</label>
       <div class="hint">O áudio que você toca no WhatsApp vira texto e passa pela triagem; áudio novo que você ainda não ouviu aparece no chat com o botão Transcrever. A transcrição e o áudio ficam no Drive, na pasta da conversa. Chave da Groq: console.groq.com → API Keys → Create API Key (tem plano gratuito; acima do limite, US$ 0,04 por hora de áudio). O áudio vai para o serviço escolhido só para virar texto.</div></div>
+    <div class="field"><label>📲 Sua conversa com você mesmo</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400"><input type="checkbox" id="sSl" ${s.selfLink !== false ? 'checked' : ''} style="width:auto"> Ligar a sua conversa ${esc(selfName() || '“Seu nome (você)”')} à assistente: o que você mandar lá (texto ou áudio) vira lembrete, compromisso, atividade ou nota, e ela responde lá</label>
+      <input id="sSn" value="${esc(s.selfName || '')}" placeholder="${esc(db.meta.selfAuto ? 'Achei: ' + db.meta.selfAuto : 'Nome da conversa (eu acho sozinho: a que termina com “(você)”)')}" style="margin-top:6px">
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sSa" ${s.selfNotices !== false ? 'checked' : ''} style="width:auto"> Mandar para lá também o briefing da manhã e da noite, os lembretes na hora e o resumo da semana</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sSu" ${s.selfUrgent ? 'checked' : ''} style="width:auto"> E os avisos urgentes do Cérebro</label>
+      <div class="hint">Vai só para o seu próprio número. O app manda quando você não está mexendo no WhatsApp (30 s parado) e volta para a conversa em que você estava. Tudo que ele manda começa com 🤖, e isso ele não lê como pedido. O celular não toca para mensagem que você manda para você mesmo: fica lá na conversa para você ver. Para mensagem a outra pessoa continua valendo o seu ok.</div></div>
     <div class="field"><label>🧠 Cérebro</label>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400"><input type="checkbox" id="sBr" ${s.brain !== false ? 'checked' : ''} style="width:auto"> Pensar sozinho quando chegar coisa nova (no máximo a cada 15 min, e a cada 1 h 30 no horário de trabalho)</label>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-weight:400;margin-top:6px"><input type="checkbox" id="sBv" ${db.brain.voice ? 'checked' : ''} style="width:auto"> Falar em voz alta quando chegar coisa importante (o botão 🔇/🔊 do painel também liga e desliga)</label>
@@ -994,6 +1001,9 @@ document.addEventListener('click', async e => {
     case 'inbox-no': case 'sug-no': db.inbox = db.inbox.filter(x => x.id !== id); sugResolve(id, 'descartada'); brainResolve(id, 'off'); save(); renderSide(); render(); break;
     case 'side-view': setSideView(id); break;
     case 'brain-think': brainThink(true); break;
+    case 'self-open': waOpen(selfName() || '(você)'); break;
+    case 'self-send': { const f = brainFind(x => x.id === id); if (f && selfSend(feedPlain(f), 'manual')) toast('📲 Vai para a sua conversa no WhatsApp (assim que ele estiver parado)'); break; }
+    case 'brain-self': { const p = db.brain.pulse; if (p && selfSend(['🧠 *Agora*', p.manchete, ...brainPrios().map(x => (URG[x.urgencia] || '•') + ' ' + x.titulo + (x.porque ? ' — ' + x.porque : ''))].join('\n'), 'manual')) toast('📲 Vai para a sua conversa no WhatsApp'); break; }
     case 'brain-say': { const p = db.brain.pulse; if (!p) break; shush(); speak([p.manchete, ...brainPrios().slice(0, 3).map(x => x.titulo + '. ' + (x.porque || ''))].join(' ')); break; }
     case 'brain-voice': db.brain.voice = !db.brain.voice; save(); renderBrain(); if (!db.brain.voice) shush(); toast(db.brain.voice ? '🔊 Vou falar em voz alta quando chegar coisa importante' : '🔇 Voz desligada'); break;
     case 'brain-more': { const f = brainFind(x => x.id === id); if (f) { f.open = !f.open; save(); renderBrain(); } break; }
@@ -1063,6 +1073,11 @@ document.addEventListener('click', async e => {
       if ($('#sD') && dlInfo && $('#sD').value.trim() !== dlInfo.dir) { const v = $('#sD').value.trim(); window.wv1desk.dlSet(v === dlInfo.def ? '' : v).then(r => { dlInfo = r; if (r.error) toast('⚠️ Pasta dos downloads: ' + r.error); }); }
       if ($('#gI')) { db.settings.gcalId = $('#gI').value.trim(); db.settings.gcalSecret = $('#gS').value.trim(); }
       if ($('#sAvD')) { db.settings.avisoDia = $('#sAvD').checked; db.settings.avisoHora = $('#sAvH').checked; }
+      if ($('#sSl')) {
+        const was = selfLinked(); db.settings.selfLink = $('#sSl').checked; db.settings.selfName = $('#sSn').value.trim(); db.settings.selfNotices = $('#sSa').checked; db.settings.selfUrgent = $('#sSu').checked;
+        if (!was && selfLinked()) db.meta.selfSince = localISO(new Date()); // religou: o que ficou lá no meio tempo é histórico
+        setTimeout(selfCfg, 100);
+      }
       if ($('#sOk')) { db.settings.oaKey = $('#sOk').value.trim(); db.settings.oaVoice = $('#sOv').checked; db.settings.oaBackup = $('#sOb').checked; db.settings.oaModel = $('#sOm').value.trim() || 'gpt-5.4-mini'; }
       if ($('#sBr')) { db.settings.brain = $('#sBr').checked; db.brain.voice = $('#sBv').checked; }
       if ($('#sTk')) { db.settings.sttProvider = $('#sTp').value; db.settings.sttKey = $('#sTk').value.trim(); db.settings.sttAuto = $('#sTa').checked; db.settings.weekly = $('#sWk').checked; audCfg(); }
@@ -1153,7 +1168,7 @@ async function sendSide() {
   const t = $('#sideInput').value.trim(); if (!t) return;
   $('#sideInput').value = ''; if (sideView() !== 'chat') setSideView('chat');
   pushMsg('claude', { from: 'me', text: t });
-  if (/^(ok|okay|pode|pode sim|manda|vai|faz|confirmo|aprovado|pode mandar|pode fazer|ok pode)\s*[.!]*$/i.test(t) && db.plans.some(p => p.status === 'aguardando_ok')) { runPlan(db.plans.find(p => p.status === 'aguardando_ok').id); return; }
+  if (OK_RE.test(t) && db.plans.some(p => p.status === 'aguardando_ok')) { runPlan(db.plans.find(p => p.status === 'aguardando_ok').id); return; }
   if (/ler todo o whatsapp/i.test(t)) sweepNow(); else if (/^📖|ler todas as conversas/i.test(t)) await readAll(true); else if (WEEK_RE.test(t)) await weeklyReport({ manual: true }); else await askClaude(t);
 }
 function sweepNow() {
@@ -1246,6 +1261,7 @@ function ingestWa(batches) {
   const ign = (db.settings.waIgnore || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
   const cutoff = Date.now() - 36 * 3600e3, toLog = {};
   for (const b of batches || []) {
+    if (b.chat && selfLinked() && isSelf(b.chat)) { selfIngest(b); continue; } // 📲 sua conversa com você mesmo: pedido direto à assistente
     if (!b.chat || ign.some(x => b.chat.toLowerCase().includes(x))) { (b.msgs || []).forEach(m => waSeen.add(m.id)); continue; }
     for (const m of b.msgs || []) {
       if (waSeen.has(m.id)) continue; waSeen.add(m.id);
@@ -1537,10 +1553,16 @@ function audIgnored(chat) { const ign = (db.settings.waIgnore || '').toLowerCase
 // o leitor viu áudios na conversa aberta: os novos (até 36 h, de outra pessoa) viram um cartão "transcrever?" por conversa
 function audioSeen(a) {
   if (!sttOn() || !a || !a.chat || audIgnored(a.chat)) return;
-  const asked = new Set(db.meta.audioAsked || []), cutoff = Date.now() - 36 * 3600e3;
-  const fresh = (a.audios || []).filter(x => x.id && !x.out && !audDone.has(x.id) && !asked.has(x.id) && waTs(x.meta).d.getTime() >= cutoff);
+  const asked = new Set(db.meta.audioAsked || []), cutoff = Date.now() - 36 * 3600e3, self = selfLinked() && isSelf(a.chat);
+  const fresh = (a.audios || []).filter(x => x.id && (!x.out || self) && !audDone.has(x.id) && !asked.has(x.id) && waTs(x.meta).d.getTime() >= cutoff && (!self || localISO(waTs(x.meta).d) >= (db.meta.selfSince || '')));
   if (!fresh.length) return;
   db.meta.audioAsked = [...asked, ...fresh.map(x => x.id)].slice(-3000);
+  if (self) { // áudio que você mandou para você mesmo: vira texto sozinho (é a sua conversa, ninguém recebe "ouvido") e vai para a assistente
+    save();
+    if (!a.sweep) try { waWv.send('wa-audio-auto', fresh.map(x => x.id)); } catch {}
+    else { audQueue.push({ chat: a.chat, ids: fresh.map(x => x.id), auto: true }); if (!waSweeping) audPump(); }
+    return;
+  }
   if (!a.sweep) { // conversa aberta na sua frente: o botão "🎤 Transcrever" já está embaixo de cada áudio; no modo sozinha, transcreve ali mesmo
     save(); if (db.settings.sttAuto) try { waWv.send('wa-audio-auto', fresh.map(x => x.id)); } catch {}
     return;
@@ -1630,7 +1652,7 @@ function weekData(ref) {
   const evW = sortedEvents().filter(e => inW(e.start.slice(0, 10))).map(evLine);
   const evN = sortedEvents().filter(e => e.start.slice(0, 10) >= nx.de && e.start.slice(0, 10) <= nx.ate).map(evLine);
   const planos = db.plans.filter(p => p.status === 'feito' && inW(day(p.fim))).flatMap(p => p.passos.filter(x => x.tipo === 'whatsapp').map(x => `- ${brDay(day(p.fim))} para ${x.conversa}: "${String(x.mensagem).slice(0, 220)}"`));
-  const log = db.waLog.filter(m => !m.prev && inW(m.when.slice(0, 10))), mine = [];
+  const log = db.waLog.filter(m => !m.prev && !isSelf(m.chat) && inW(m.when.slice(0, 10))), mine = [];
   log.forEach((m, i) => { if (m.who === 'Eu') mine.push(`- ${m.when.slice(5, 16).replace('T', ' ')} ${m.chat}: "${m.text.slice(0, 200)}"${log.slice(i + 1).some(x => x.chat === m.chat && x.who !== 'Eu') ? '' : ' [sem resposta depois]'}`); });
   const sug = db.inbox.map(x => `- ${x.titulo}${x.conversa ? ' (' + x.conversa + ')' : ''}`);
   return { w, nx, feitas, pend, evW, evN, planos, mine: mine.slice(-80), sug };
@@ -1651,7 +1673,7 @@ function weekMd(r, w) {
 function mdHtml(md) { // markdown simples do resumo → HTML
   return String(md).split('\n').map(l => { const e = esc(l).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'); return l.startsWith('# ') ? `<h2>${e.slice(2)}</h2>` : l.startsWith('## ') ? `<h3>${e.slice(3)}</h3>` : l.startsWith('- ') ? `<div class="li">• ${e.slice(2)}</div>` : l.trim() ? `<div>${e}</div>` : ''; }).join('');
 }
-async function weeklyReport({ ref, auto, manual }) {
+async function weeklyReport({ ref, auto, manual, self }) {
   if (weekBusy) return { error: 'o resumo já está sendo montado' };
   weekBusy = true; renderSide();
   const typing = manual ? pushMsg('claude', { from: 'them', text: 'montando o resumo da semana…', pending: true }) : null;
@@ -1683,6 +1705,7 @@ Frases curtas e concretas, com número, documento e prazo quando houver. Não in
     if (typing) { const c = db.chats.find(x => x.id === 'claude'); c.messages = c.messages.filter(x => x.id !== typing.id); }
     const wid = uid();
     pushMsg('claude', { from: 'them', card: { type: 'week', id: wid, de: w.de, ate: w.ate, file, md, obras: (r.obras || []).map(o => o.nome), atencao: (r.atencao || [])[0] || '', counts: { feito: cnt('feito'), pendente: cnt('pendente'), esperando: cnt('esperando') } } });
+    selfSend(waFmt(md), self ? 'reply' : 'aviso');
     brainAdd({ kind: 'week', icon: '📊', cardId: wid, text: `Resumo da semana pronto (${shortRange(w.de, w.ate)}): ${cnt('pendente')} pendente(s), ${cnt('esperando')} esperando terceiros.`, sub: (r.obras || []).map(o => o.nome).join(' · '), quiet: true });
     if (auto) notify('📊 Resumo da semana pronto', `${(r.obras || []).length} obra(s) · ${cnt('pendente')} pendente(s) · ${cnt('esperando')} esperando terceiros`);
     return { ok: true, file, obras: (r.obras || []).map(o => o.nome) };
@@ -1706,10 +1729,13 @@ function setSideView(v) {
 }
 function renderSideTabs() {
   const t = $('#sideTabs'); if (!t) return;
+  const sb = $('#selfBar'); if (sb) sb.innerHTML = !selfLinked() ? '' : selfName() ? `<span>📲 Ligada à sua conversa <b>${esc(selfName())}</b> no WhatsApp: o que você mandar lá chega aqui, e eu respondo lá.</span><button data-act="self-open">Abrir</button>`
+    : '<span>📲 Ainda não achei a sua conversa com você mesmo no WhatsApp. Mande qualquer mensagem para você mesmo lá, ou escreva o nome dela em Configurações.</span>';
   const v = sideView(), n = db.chats.find(x => x.id === 'claude').unread || 0;
   $('#cal').classList.toggle('vchat', v === 'chat');
   t.innerHTML = `<button data-act="side-view" data-id="brain" class="${v === 'brain' ? 'on' : ''}">🧠 Cérebro${brainBusy ? ' <span class="think">pensando…</span>' : ''}</button>`
     + `<button data-act="side-view" data-id="chat" class="${v === 'chat' ? 'on' : ''}">💬 Conversa${n && v !== 'chat' ? ` <i>${n}</i>` : ''}</button>`
+    + (DESK ? `<button class="vt" data-act="self-open" title="Abrir a sua conversa ${esc(selfName() || 'com você mesmo')} no WhatsApp">📲</button>` : '')
     + `<button class="vt" data-act="brain-voice" title="${db.brain.voice ? 'Falando sozinho quando chega coisa importante (clique para calar)' : 'Clique para eu falar em voz alta quando chegar coisa importante'}">${db.brain.voice ? '🔊' : '🔇'}</button>`;
 }
 function brainAdd(e) {
@@ -1754,10 +1780,11 @@ function feedActs(f) {
   if (f.kind === 'rem') return f.eventId ? `<button data-event="${f.eventId}">📅 Abrir</button>` : `<button class="ok" data-toggle="${f.taskId}">✅ Feito</button>` + b('brain-snooze', '⏰ +1 h') + `<button data-act="task-plan" data-id="${f.taskId}">⚡ Resolver</button>`;
   if (f.kind === 'plan') return `<button class="ok" data-act="plan-ok" data-id="${f.planId}">✅ Ok, pode fazer</button><button data-act="plan-cancel" data-id="${f.planId}">Cancelar</button>`;
   if (f.kind === 'week') return f.cardId ? `<button data-act="week-view" data-id="${f.cardId}">Ver resumo</button>` : '';
+  if (f.kind === 'self') return '<button data-act="side-view" data-id="chat">💬 Ver na Conversa</button>';
   return open;
 }
 function feedHtml(f) {
-  const live = feedLive(f), sub = feedSub(f), acts = feedActs(f), lines = String(f.text || '').split('\n'), long = f.kind === 'brief' && lines.length > 7;
+  const live = feedLive(f), sub = feedSub(f), acts = feedActs(f) + (selfReady() && f.kind !== 'self' && f.text ? `<button class="x" data-act="self-send" data-id="${f.id}" title="Mandar para a sua conversa no WhatsApp">📲</button>` : ''), lines = String(f.text || '').split('\n'), long = f.kind === 'brief' && lines.length > 7;
   const txt = long && !f.open ? lines.slice(0, 6).join('\n') + '\n…' : f.text;
   const dim = !live && ['sug', 'done?', 'rem', 'plan'].includes(f.kind);
   return `<div class="fe k-${f.kind}${f.prio === 'alta' && !dim ? ' alta' : ''}${dim ? ' off' : ''}${Date.now() - new Date(f.ts) < 8000 ? ' fresh' : ''}"><div class="tm">${feedTime(f.ts)}</div><div class="fb">`
@@ -1778,7 +1805,7 @@ function brainPrios() {
 function pulseHtml() {
   const p = db.brain.pulse, keyless = !db.settings.apiKey && !oaOn();
   const st = brainBusy ? '<span class="think">pensando…</span>' : brainErr ? '⚠️ ' + esc(brainErr) : p && p.ts ? 'atualizado ' + feedTime(p.ts) + (p.via === 'openai' ? ' · pela OpenAI (reserva)' : p.via === 'basico' ? ' · modo básico' : '') : '';
-  const head = `<div class="bh"><b>Agora</b><span class="bs">${st}</span><span class="bb"><button data-act="brain-say" title="Ouvir em voz alta">🗣️</button><button data-act="brain-think" title="Pensar de novo agora">↻</button></span></div>`;
+  const head = `<div class="bh"><b>Agora</b><span class="bs">${st}</span><span class="bb">${p && selfReady() ? '<button data-act="brain-self" title="Mandar para a sua conversa no WhatsApp">📲</button>' : ''}<button data-act="brain-say" title="Ouvir em voz alta">🗣️</button><button data-act="brain-think" title="Pensar de novo agora">↻</button></span></div>`;
   if (!p) return `<div class="bnow">${head}<div class="man mu">${keyless ? 'Sem a chave do Claude eu só organizo o básico (Configurações).' : 'Estou juntando o que chegou; já te conto o que importa.'}</div></div>`;
   const pr = brainPrios();
   return `<div class="bnow">${head}<div class="man">${esc(p.manchete || '')}</div>`
@@ -1806,7 +1833,7 @@ function brainInput() {
   });
   const sug = db.inbox.slice(0, 15).map(x => `- ${x.titulo}${x.quando ? ' (' + x.quando + ')' : ''} · ${[x.pessoa, x.conversa].filter(Boolean).join(' · ')} · prioridade ${x.prioridade}${x.trecho ? ' · “' + x.trecho.slice(0, 140) + '”' : ''}`);
   const since = localISO(new Date(Date.now() - 12 * 3600e3)), wk = localISO(new Date(Date.now() - 7 * 864e5)), byChat = {}, week = {};
-  for (const m of db.waLog) { if (m.prev) continue; if (m.when >= since) (byChat[m.chat] = byChat[m.chat] || []).push(m); if (m.when >= wk) (week[m.chat] = week[m.chat] || []).push(m); }
+  for (const m of db.waLog) { if (m.prev || isSelf(m.chat)) continue; if (m.when >= since) (byChat[m.chat] = byChat[m.chat] || []).push(m); if (m.when >= wk) (week[m.chat] = week[m.chat] || []).push(m); }
   const wa = Object.entries(byChat).sort((a, b) => b[1][b[1].length - 1].when.localeCompare(a[1][a[1].length - 1].when)).slice(0, 18).map(([chat, ms]) => {
     const k = ms.map(m => m.who !== 'Eu').lastIndexOf(true), answered = k >= 0 && ms.slice(k + 1).some(m => m.who === 'Eu');
     return `### ${chat}\n` + ms.slice(-10).map(m => `- ${m.when.slice(11, 16)} ${m.who}: ${m.text.slice(0, 260)}${m === ms[k] && !answered ? ' [sem resposta sua]' : ''}`).join('\n');
@@ -1864,6 +1891,7 @@ async function brainThink(force) {
       brainAdd({ kind: 'pulse', icon: '🧠', text: out.manchete, chat: novas[0].conversa || '', prio: 'alta', quiet: true });
       notify('🧠 ' + novas[0].titulo, novas[0].porque || out.manchete);
       if (B.voice) speak(out.manchete);
+      selfSend('🧠 ' + out.manchete, 'urgente');
     }
   } catch (e) { brainErr = String(e.message || e).slice(0, 90); console.warn('cérebro:', brainErr); }
   finally { B.at = Date.now(); B.sig = brainSig(); brainBusy = false; save(); renderBrain(); renderSide(); }
@@ -1881,6 +1909,97 @@ function waOpen(chat) { // abre a conversa no WhatsApp ao lado
   tab = 'wa'; db.meta.view = 'wa'; save(); render();
   try { waWv.send('wa-open', { chat }); } catch {}
 }
+
+// ---------- 📲 sua conversa com você mesmo no WhatsApp ("Tiago (você)") ligada à Conversa da assistente ----------
+// O que você manda lá (texto ou áudio, do celular) chega na Conversa como pedido seu: ela age e responde lá, com 🤖 na frente.
+// Do app para lá: as respostas, o briefing, os lembretes na hora e o resumo da semana. É o seu número: não vai para mais ninguém.
+var selfQ = [], selfTimer = null, selfBusy = false, selfOut = [], selfPumping = false; // var: o painel lê antes desta linha rodar
+var OK_RE = /^(ok|okay|pode|pode sim|manda|vai|faz|confirmo|aprovado|pode mandar|pode fazer|ok pode)\s*[.!]*$/i;
+if (!db.meta.selfSince) db.meta.selfSince = localISO(new Date()); // o que já estava lá antes de ligar é histórico, não pedido
+function selfLinked() { return DESK && db.settings.selfLink !== false && db.settings.waRead !== false; }
+function selfName() { return (db.settings.selfName || '').trim() || db.meta.selfAuto || ''; }
+function selfReady() { return selfLinked() && !!selfName(); } // já sei qual é a conversa (achei na lista ou você escreveu o nome)
+function isSelf(chat) { const n = selfName().toLowerCase(); chat = String(chat || '').trim(); return !!chat && (/\((voc[eê]|you)\)$/i.test(chat) || (!!n && chat.toLowerCase() === n)); }
+function selfKey(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+function selfCfg() { try { waWv && waWv.send('wa-self-cfg', { on: selfLinked(), name: selfName() }); } catch {} }
+function waFmt(t) { // markdown do app → formatação do WhatsApp
+  return String(t || '').split('\n').map(l => /^#{1,3} /.test(l) ? '*' + l.replace(/^#+ /, '').trim() + '*' : l.startsWith('- ') ? '• ' + l.slice(2) : l).join('\n').replace(/\*\*(.+?)\*\*/g, '*$1*').replace(/\n{3,}/g, '\n\n').trim();
+}
+function selfIngest(b) {
+  const since = db.meta.selfSince || '', wk = localISO(new Date(Date.now() - 7 * 864e5)), sent = new Set(db.meta.selfSent || []), lines = [];
+  for (const m of b.msgs || []) {
+    if (waSeen.has(m.id)) continue; waSeen.add(m.id);
+    const text = String(m.text || '').trim();
+    if (!text || m.id.startsWith('p:') || /^\s*🤖/u.test(text) || sent.has(selfKey(text))) continue; // a prévia não serve; 🤖 é o que o app mandou lá
+    const when = localISO(waTs(m.meta).d), rec = { chat: b.chat, who: 'Eu', when, text: text.slice(0, 3000) };
+    db.waLog.push(rec); lines.push(rec); // fica na busca ("o que eu anotei sobre…")
+    if (when >= since && when >= wk) selfQ.push(rec);
+  }
+  if (lines.length && db.settings.driveLog !== false && window.wv1desk && window.wv1desk.logAppend) window.wv1desk.logAppend({ chat: b.chat, lines }).catch(() => {});
+  if (selfQ.length) { clearTimeout(selfTimer); selfTimer = setTimeout(selfFlush, 4000); }
+}
+async function selfFlush() {
+  if (selfBusy || reading) { clearTimeout(selfTimer); selfTimer = setTimeout(selfFlush, 3000); return; }
+  const batch = selfQ.splice(0, 15); if (!batch.length) return;
+  selfBusy = true;
+  try {
+    const stamp = batch.length > 1 || Date.now() - parseLocal(batch[0].when).getTime() > 10 * 60e3; // mandada com o app fechado: a hora vai junto
+    const raw = batch.map(m => m.text).join('\n'), shown = batch.map(m => (stamp ? `(${shortDay(m.when)} ${fmtHour(m.when)}) ` : '') + m.text).join('\n');
+    pushMsg('claude', { from: 'me', text: '📲 ' + shown, via: 'self' });
+    const plan = db.plans.find(p => p.status === 'aguardando_ok' && p.selfAt);
+    const lines = batch.length === 1 && OK_RE.test(raw) && plan && batch[0].when >= plan.selfAt ? await selfMirror(() => runPlan(plan.id)) // o ok que você deu lá, depois de ver o plano lá
+      : WEEK_RE.test(raw) ? await selfMirror(() => weeklyReport({ manual: true, self: true }))
+      : await selfMirror(() => askClaude(raw));
+    brainAdd({ kind: 'self', icon: '📲', text: 'Do seu WhatsApp: “' + raw.replace(/\s+/g, ' ').slice(0, 160) + (raw.length > 160 ? '…' : '') + '”', sub: lines.length ? '↪ ' + lines[0].replace(/\s+/g, ' ').slice(0, 150) : '', quiet: true });
+  } catch (e) { console.warn('conversa com você mesmo:', e.message); }
+  finally { selfBusy = false; if (selfQ.length) selfTimer = setTimeout(selfFlush, 1000); }
+}
+async function selfMirror(fn) { // o que a assistente respondeu na Conversa vai também para lá
+  const before = new Set(db.chats.find(x => x.id === 'claude').messages.map(m => m.id));
+  await fn();
+  const fresh = db.chats.find(x => x.id === 'claude').messages.filter(m => !before.has(m.id) && m.from === 'them' && !m.pending);
+  const lines = [...fresh.filter(m => m.text), ...fresh.filter(m => !m.text)].map(selfLine).filter(Boolean); // a frase dela primeiro, depois o que ficou marcado
+  if (lines.length) selfSend(lines.join('\n'), 'reply');
+  return lines;
+}
+function selfLine(m) {
+  if (m.text) return waFmt(m.text);
+  const k = m.card; if (!k) return '';
+  if (k.type === 'task') { const t = db.tasks.find(x => x.id === k.id); return !t ? '' : t.remindAt ? `🔔 ${shortDay(t.remindAt)}, ${fmtHour(t.remindAt)}: ${t.title}` : `✅ Atividade: ${t.title}${t.due ? ' (prazo ' + shortDay(t.due) + ')' : ''}`; }
+  if (k.type === 'event') { const e = db.events.find(x => x.id === k.id); return e ? `📅 ${fmtWhen(e)}: ${e.title}${e.location ? ' — ' + e.location : ''}` : ''; }
+  if (k.type === 'plan') {
+    const p = db.plans.find(x => x.id === k.id); if (!p || p.status !== 'aguardando_ok') return '';
+    p.selfAt = localISO(new Date()); save();
+    return `🗂 Deixei pronto para o seu ok: ${p.titulo}\n` + p.passos.map(st => '• ' + stepText(st)).join('\n') + '\nResponda *ok* aqui para eu fazer, ou aprove no app.';
+  }
+  return '';
+}
+// kind: reply (resposta ao que você mandou lá) e manual sempre vão; aviso (briefing, lembretes, semana) se ligado; urgente (Cérebro) só se você ligar
+function selfSend(text, kind) {
+  text = String(text || '').trim(); if (!text || !selfLinked() || !waWv) return false;
+  if ((kind === 'aviso' || kind === 'urgente') && !selfReady()) return false; // sem achar a conversa ainda, aviso automático não tenta
+  if (kind === 'aviso' && db.settings.selfNotices === false) return false;
+  if (kind === 'urgente' && !db.settings.selfUrgent) return false;
+  selfOut.push(text); setTimeout(selfPump, 300); return true;
+}
+async function selfPump() {
+  if (selfPumping || !waWv) return; selfPumping = true;
+  try {
+    while (selfOut.length) {
+      let text = selfOut.shift();
+      while (selfOut.length && text.length + selfOut[0].length < 3000) text += '\n\n' + selfOut.shift(); // o que juntou enquanto o WhatsApp estava em uso vai numa mensagem só
+      text = '🤖 ' + text.slice(0, 3500);
+      const k = selfKey(text); db.meta.selfSent = [...(db.meta.selfSent || []).filter(x => x !== k), k].slice(-60); save(); // a leitura reconhece e não responde a si mesma
+      const r = await new Promise(resolve => {
+        const id = uid(); waSendWaiters[id] = resolve;
+        setTimeout(() => { if (waSendWaiters[id]) { delete waSendWaiters[id]; resolve({ ok: false, erro: 'o WhatsApp não respondeu (tempo esgotado)' }); } }, 25 * 60e3);
+        try { waWv.send('wa-self-send', { id, text }); } catch (e) { delete waSendWaiters[id]; resolve({ ok: false, erro: e.message }); }
+      });
+      if (!r.ok) brainAdd({ kind: 'info', icon: '📲', text: 'Não consegui mandar para a sua conversa no WhatsApp: ' + (r.erro || 'falhou'), prio: 'baixa', quiet: true });
+    }
+  } finally { selfPumping = false; }
+}
+function feedPlain(f) { const sub = feedSub(f); return [f.head ? '*' + f.head + '*' : '', (f.icon ? f.icon + ' ' : '') + waFmt(f.text || ''), sub && f.kind !== 'plan' ? sub : ''].filter(Boolean).join('\n'); }
 
 // ---------- computador: WhatsApp Web dentro do app ----------
 let driveInfo = null, dlInfo = null;
@@ -1910,9 +2029,10 @@ if (DESK) {
     if (d.downloads && !d.appFile && /\.(ogg|opus|mp3|m4a|wav|flac|mpga)$/i.test(d.name || '') && sttOn()) audFile(d);
   });
   waWv = wv;
-  wv.addEventListener('dom-ready', () => { audCfg(); audTxSync(); });
+  wv.addEventListener('dom-ready', () => { audCfg(); audTxSync(); selfCfg(); });
   wv.addEventListener('ipc-message', e => {
     if (e.channel === 'wa-msgs') ingestWa(e.args[0]);
+    if (e.channel === 'wa-self-found') { const n = String((e.args[0] || {}).name || ''); if (n && n !== db.meta.selfAuto) { db.meta.selfAuto = n; save(); selfCfg(); renderSideTabs(); } }
     if (e.channel === 'wa-audio-seen') audioSeen(e.args[0]);
     if (e.channel === 'wa-audio') onWaAudio(e.args[0]);
     if (e.channel === 'wa-opened') { const r = e.args[0] || {}; if (!r.ok) toast('Não achei a conversa "' + (r.chat || '') + '" na lista do WhatsApp'); }
@@ -1962,6 +2082,7 @@ function tick() {
       t.notified = true; changed = true;
       const src = t.chatId && t.chatId !== 'claude' && db.chats.find(c => c.id === t.chatId);
       brainAdd({ kind: 'rem', key: 't:' + t.id, taskId: t.id, head: '⏰ Hora do lembrete · ' + fmtHour(t.remindAt), text: t.title, sub: src ? '💬 ' + src.name : '', prio: 'alta', say: 'Lembrete: ' + t.title });
+      selfSend('⏰ Lembrete ' + fmtHour(t.remindAt) + ': ' + t.title, 'aviso');
       notify('⏰ ' + t.title, 'Lembrete do WhatsApp v1');
     }
   }
@@ -1978,6 +2099,7 @@ function tick() {
     for (const w of dueWarnings(ev, ev.start, ev.allDay)) {
       changed = true; const head = warnHead(w, ev.start, 'event', ev.allDay);
       brainAdd({ kind: 'rem', key: 'e:' + ev.id, eventId: ev.id, head, text: ev.title, sub: ev.location ? '📍 ' + ev.location : '', prio: w === 'h1' ? 'alta' : 'media', say: head.replace(/^\W+/, '') + ': ' + ev.title });
+      if (w === 'h1') selfSend(head + ': ' + ev.title + (ev.location ? ' — ' + ev.location : ''), 'aviso');
       notify('📅 ' + ev.title, head + (ev.location ? ' · ' + ev.location : ''));
     }
   }
@@ -2038,7 +2160,8 @@ function briefData(kind) {
   return lines.join('\n\n');
 }
 async function briefing(kind) {
-  const text = briefData(kind), post = t => brainAdd({ kind: 'brief', head: kind === 'manha' ? '☀️ Briefing da manhã' : '🌙 Fechando o dia', text: t, quiet: true });
+  const head = kind === 'manha' ? '☀️ Briefing da manhã' : '🌙 Fechando o dia';
+  const text = briefData(kind), post = t => { brainAdd({ kind: 'brief', head, text: t, quiet: true }); selfSend('*' + head + '*\n' + waFmt(t), 'aviso'); };
   if (!db.settings.apiKey) { post(text); return; }
   try {
     await callClaude({ system: systemPrompt() + `\nVocê está escrevendo, por iniciativa própria, o briefing ${kind === 'manha' ? 'da manhã' : 'do fim do dia'}.`, tools: TOOLS, postTo: 'claude', onText: post,
